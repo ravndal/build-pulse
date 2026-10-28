@@ -202,8 +202,14 @@ sealed class DashboardForm : PopupForm
             Badge.Draw(g, new RectangleF(W - pad - b, (headerH - b) / 2f, b, b),
                 m.State == TrayState.Approval && _frame / 5 % 2 == 1 ? Palette.Red : stateColor, stateGlyph, _frame);
         }
-        Text("Pipelines", _titleFont, new Rectangle(pad, Px(10), W - pad * 3, Px(24)), Palette.Text);
-        Text(Summary(m), Font, new Rectangle(pad, Px(34), W - pad * 4, Px(18)), Palette.Muted);
+        int logoSize = Px(36), titleX = pad + logoSize + Px(10);
+        if (g != null)
+        {
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+            g.DrawImage(AppLogo(logoSize), new Rectangle(pad, (headerH - logoSize) / 2, logoSize, logoSize));
+        }
+        Text("Pipelines", _titleFont, new Rectangle(titleX, Px(10), W - titleX - pad * 2, Px(24)), Palette.Text);
+        Text(Summary(m), Font, new Rectangle(titleX, Px(34), W - titleX - pad * 3, Px(18)), Palette.Muted);
         y += headerH;
 
         // Tabs
@@ -284,6 +290,22 @@ sealed class DashboardForm : PopupForm
         return y;
 
         void AddHit(Rectangle r, Action onClick) => _hits.Add(new Hit(r, onClick));
+    }
+
+    Bitmap? _appLogo;
+    int _appLogoSize;
+
+    /// <summary>The app icon at the closest size the .ico has, cached until the DPI asks for another size.</summary>
+    Bitmap AppLogo(int size)
+    {
+        if (_appLogo == null || _appLogoSize != size)
+        {
+            _appLogo?.Dispose();
+            _appLogoSize = size;
+            using var icon = new Icon(IconFactory.App, size, size);
+            _appLogo = icon.ToBitmap();
+        }
+        return _appLogo;
     }
 
     /// <summary>Hit rectangles of the last paint, so hover highlighting survives the hit list being rebuilt mid-paint.</summary>

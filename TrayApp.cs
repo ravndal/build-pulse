@@ -10,8 +10,9 @@ sealed class TrayApp : ApplicationContext
     readonly bool _demo;
     readonly NotifyIcon _tray;
     readonly DashboardForm _dashboard;
-    readonly ToolStripMenuItem _muteItem, _startupItem;
+    readonly ToolStripMenuItem _muteItem, _startupItem, _updateItem;
     readonly System.Windows.Forms.Timer _pollTimer = new();
+    readonly System.Windows.Forms.Timer _updateTimer = new() { Interval = 30_000 };
     readonly System.Windows.Forms.Timer _animTimer = new() { Interval = 120 };
     readonly DateTime _startedAt = DateTime.Now;
 
@@ -34,8 +35,10 @@ sealed class TrayApp : ApplicationContext
     DateTime? _lastPoll;
     TrayState _state = TrayState.Unconfigured;
     int _frame;
+    UpdateInfo? _pendingUpdate;
+    bool _checkingUpdate, _installFailed;
 
-    public TrayApp(bool demo, bool openSettings = false)
+    public TrayApp(bool demo, bool openSettings = false, bool updated = false)
     {
         _demo = demo;
         _settings = demo ? DemoSource.CreateSettings() : AppSettings.Load();
@@ -62,6 +65,17 @@ sealed class TrayApp : ApplicationContext
         menu.Items.Add(_muteItem);
         menu.Items.Add(_startupItem);
         menu.Items.Add(new ToolStripSeparator());
+        _updateItem = new ToolStripMenuItem($"Check for updates (v{Updater.CurrentVersion.ToString(3)})")
+        {
+            Enabled = !demo && Updater.IsSupported,
+        };
+        _updateItem.Click += (_, _) =>
+        {
+            if (_pendingUpdate != null) InstallUpdate();
+            else _ = CheckForUpdateAsync(manual: true);
+        };
+        menu.Items.Add(_updateItem);
+        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Exit", null, (_, _) => ExitThread());
 
         _tray = new NotifyIcon
@@ -76,8 +90,83 @@ sealed class TrayApp : ApplicationContext
         _pollTimer.Tick += async (_, _) => await PollAsync();
         _animTimer.Tick += (_, _) => { _frame++; RenderIcon(); };
 
+        if (!demo && Updater.IsSupported)
+        {
+            Updater.CleanUp();
+            // First check shortly after start, then every 6 hours.
+            _updateTimer.Tick += (_, _) =>
+            {
+                _updateTimer.Interval = 6 * 60 * 60 * 1000;
+                _ = CheckForUpdateAsync(manual: false);
+            };
+            _updateTimer.Start();
+        }
+
         ApplySettings(_settings);
         if (openSettings) ShowSettings();
+        if (updated) Toast(Palette.Green, $"Updated to v{Updater.CurrentVersion.ToString(3)}", "DevOps Watcher is up to date.", null, force: true);
+    }
+
+    async Task CheckForUpdateAsync(bool manual)
+    {
+        if (_checkingUpdate || _pendingUpdate != null) return;
+        _checkingUpdate = true;
+        try
+        {
+            var update = await Updater.CheckAndDownloadAsync();
+            if (update == null)
+            {
+                if (manual) Toast(Palette.Green, "No update available", $"v{Updater.CurrentVersion.ToString(3)} is the latest version.", null, force: true);
+                return;
+            }
+            Log.Write($"Update v{update.Version} downloaded");
+            _pendingUpdate = update;
+            _updateItem.Text = $"Restart to update to v{update.Version.ToString(3)}";
+            if (manual || !_settings.AutoUpdate) InstallOrNotify(manual);
+            else TryAutoInstall();
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"Update check failed: {ex.GetType().Name}: {ex.Message}");
+            if (manual) Toast(Palette.Red, "Update check failed", ex.Message, null, force: true);
+        }
+        finally
+        {
+            _checkingUpdate = false;
+        }
+    }
+
+    void InstallOrNotify(bool manual)
+    {
+        if (manual) { InstallUpdate(); return; }
+        Toast(Palette.Blue, $"Update v{_pendingUpdate!.Version.ToString(3)} available",
+            "Right-click the tray icon and choose Restart to update.", _pendingUpdate.ReleaseUrl, force: true);
+    }
+
+    /// <summary>Installs a downloaded update once nothing needs the user's attention.</summary>
+    void TryAutoInstall()
+    {
+        if (_pendingUpdate == null || _installFailed || !_settings.AutoUpdate) return;
+        if (_approvals.Count > 0 || _approvalForms.Count > 0 || _settingsForm != null) return;
+        InstallUpdate();
+    }
+
+    void InstallUpdate()
+    {
+        if (_pendingUpdate == null) return;
+        try
+        {
+            Log.Write($"Installing update v{_pendingUpdate.Version}");
+            Updater.Install(_pendingUpdate);
+            ExitThread();
+        }
+        catch (Exception ex)
+        {
+            _installFailed = true;
+            Log.Write($"Update install failed: {ex.GetType().Name}: {ex.Message}");
+            Toast(Palette.Red, "Update failed", $"Couldn't replace the exe ({ex.Message}). Click to download it manually.",
+                _pendingUpdate.ReleaseUrl, force: true);
+        }
     }
 
     void ApplySettings(AppSettings settings)
@@ -379,6 +468,7 @@ sealed class TrayApp : ApplicationContext
         RenderIcon();
         _tray.Text = Tooltip();
         _dashboard.SetModel(CreateModel());
+        TryAutoInstall();
     }
 
     void RenderIcon()
@@ -489,6 +579,7 @@ sealed class TrayApp : ApplicationContext
     {
         _pollTimer.Stop();
         _animTimer.Stop();
+        _updateTimer.Stop();
         _tray.Visible = false;
         _tray.Dispose();
         _source?.Dispose();

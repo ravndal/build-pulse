@@ -288,6 +288,7 @@ sealed class SettingsForm : Form
             ProtectedPat = _current.ProtectedPat,
             PollSeconds = (int)_poll.Value,
             ShowStatusPopups = _popups.Checked,
+            AutoUpdate = _current.AutoUpdate,
             EnableManualValidationActions = _validationActions.Checked,
             Pipelines = _tracked.Values.OrderBy(p => p.Project).ThenBy(p => p.Name).ToList(),
             RateLimits = _rateLimits,

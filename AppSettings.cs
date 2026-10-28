@@ -46,6 +46,8 @@ public sealed class AppSettings
     public string? ProtectedPat { get; set; }
     public int PollSeconds { get; set; } = 20;
     public bool ShowStatusPopups { get; set; } = true;
+    /// <summary>Install new releases from GitHub automatically when no approval is waiting.</summary>
+    public bool AutoUpdate { get; set; } = true;
     /// <summary>Experimental: Resume/Reject ManualValidation steps from the popup via an undocumented use of plan events.</summary>
     public bool EnableManualValidationActions { get; set; }
     public List<TrackedPipeline> Pipelines { get; set; } = [];

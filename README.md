@@ -15,6 +15,22 @@ A small Windows tray app that watches selected Azure DevOps pipelines.
 - **Left-click** the icon to open the dashboard: pending approvals plus the last 8 builds. Click a row to open it in the browser.
 - **Right-click** the icon for Refresh, Settings, Mute, Start with Windows, and Exit.
 
+## Install & updates
+
+Download `DevOpsWatcher.exe` from the [latest release](https://github.com/ravndal/devops-pipline-watcher/releases/latest) and run it from a folder you can write to (for example `%LOCALAPPDATA%\DevOpsWatcher`).
+
+The app checks GitHub for a new release 30 seconds after start and then every 6 hours. It downloads the new exe, checks its SHA-256 against the release, and restarts into it as soon as no approval is waiting. Right-click the tray icon → **Check for updates** to check now. Set `"AutoUpdate": false` in `settings.json` to be asked instead (a toast, then **Restart to update** in the tray menu).
+
+### Releasing
+
+CI builds every push to `main` and every pull request. To ship a version, push a tag:
+
+```bash
+git tag v1.2.0 && git push origin v1.2.0
+```
+
+The Release workflow publishes the single-file exe with that version and creates the GitHub release; installed apps pick it up on their next check.
+
 ## Build & run
 
 Requires the .NET 10 SDK.

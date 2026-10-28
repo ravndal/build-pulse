@@ -20,16 +20,29 @@ sealed class DemoSource : IPipelineSource
 
     public static AppSettings CreateSettings() => new()
     {
-        ServerUrl = Url,
-        UseWindowsAuth = true,
+        Servers =
+        [
+            new ServerConfig
+            {
+                Id = "demo",
+                Kind = ServerKind.AzureDevOps,
+                Url = Url,
+                UseWindowsAuth = true,
+                Pipelines = Enumerable.Range(1, 3).Select(i => new TrackedPipeline { Project = Project, DefinitionId = i, Name = Names[i] }).ToList(),
+            },
+        ],
         PollSeconds = 10,
         EnableManualValidationActions = true,
-        Pipelines = Enumerable.Range(1, 3).Select(i => new TrackedPipeline { Project = Project, DefinitionId = i, Name = Names[i] }).ToList(),
     };
 
     double T => (DateTime.Now - _t0).TotalSeconds;
 
-    public Task<List<BuildInfo>> GetBuildsAsync(string project, IReadOnlyCollection<int> definitionIds, int top)
+    public Task<List<ProjectInfo>> GetProjectsAsync() => Task.FromResult(new List<ProjectInfo> { new("demo", Project) });
+
+    public Task<List<DefinitionInfo>> GetDefinitionsAsync(string project) =>
+        Task.FromResult(Enumerable.Range(1, 3).Select(i => new DefinitionInfo(i, Names[i], "")).ToList());
+
+    public Task<List<BuildInfo>> GetBuildsAsync(string project, IReadOnlyCollection<long> definitionIds, int top)
     {
         var list = new List<BuildInfo>();
         string[] results = ["succeeded", "succeeded", "failed", "succeeded", "partiallySucceeded", "succeeded", "canceled"];
@@ -62,7 +75,7 @@ sealed class DemoSource : IPipelineSource
         return Task.FromResult(list.Where(b => definitionIds.Contains(b.DefinitionId)).ToList());
     }
 
-    public Task<List<TimelineRecord>> GetTimelineAsync(string project, int buildId)
+    public Task<List<TimelineRecord>> GetTimelineAsync(string project, long buildId)
     {
         double t = T;
         var records = new List<TimelineRecord>();
@@ -156,7 +169,7 @@ sealed class DemoSource : IPipelineSource
         PlanId = $"00000000-0000-4000-8000-000000000{id}",
     };
 
-    static string RunUrl(int id) => $"{Url}/{Project}/_build/results?buildId={id}";
+    static string RunUrl(long id) => $"{Url}/{Project}/_build/results?buildId={id}";
 
     public void Dispose() { }
 }

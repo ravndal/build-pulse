@@ -1,15 +1,10 @@
-using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json.Nodes;
+using static DevOpsWatcher.Json;
 
 namespace DevOpsWatcher;
-
-public sealed class AzDoException(int statusCode, string message) : Exception(message)
-{
-    public int StatusCode { get; } = statusCode;
-}
 
 /// <summary>
 /// Minimal Azure DevOps REST client. Works against dev.azure.com and Azure DevOps Server
@@ -56,12 +51,12 @@ public sealed class AzDoClient : IPipelineSource
     {
         var json = await SendAsync(RateLimiter.Endpoints.Definitions, HttpMethod.Get, $"{Esc(project)}/_apis/build/definitions?$top=5000&{Api}");
         return Items(json)
-            .Select(d => new DefinitionInfo(Int(d.N("id")), Str(d.N("name")), Str(d.N("path"))))
+            .Select(d => new DefinitionInfo(Long(d.N("id")), Str(d.N("name")), Str(d.N("path"))))
             .OrderBy(d => d.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
-    public async Task<List<BuildInfo>> GetBuildsAsync(string project, IReadOnlyCollection<int> definitionIds, int top)
+    public async Task<List<BuildInfo>> GetBuildsAsync(string project, IReadOnlyCollection<long> definitionIds, int top)
     {
         var defs = string.Join(",", definitionIds);
         var json = await SendAsync(RateLimiter.Endpoints.Builds, HttpMethod.Get,
@@ -69,7 +64,7 @@ public sealed class AzDoClient : IPipelineSource
         return Items(json).Select(ParseBuild).ToList();
     }
 
-    public async Task<List<TimelineRecord>> GetTimelineAsync(string project, int buildId)
+    public async Task<List<TimelineRecord>> GetTimelineAsync(string project, long buildId)
     {
         var json = await SendAsync(RateLimiter.Endpoints.Timeline, HttpMethod.Get, $"{Esc(project)}/_apis/build/builds/{buildId}/timeline?{Api}");
         if (json.N("records") is not JsonArray records) return [];
@@ -95,7 +90,7 @@ public sealed class AzDoClient : IPipelineSource
         {
             var pipeline = a.N("pipeline");
             var owner = pipeline.N("owner");
-            int runId = Int(owner.N("id"));
+            long runId = Long(owner.N("id"));
             var approvers = (a.N("steps") as JsonArray)?.OfType<JsonNode>()
                 .Select(s => Str(s.N("assignedApprover").N("displayName")))
                 .Where(n => n != "")
@@ -105,7 +100,7 @@ public sealed class AzDoClient : IPipelineSource
             {
                 Id = Str(a.N("id")),
                 Project = project,
-                DefinitionId = Int(pipeline.N("id")),
+                DefinitionId = Long(pipeline.N("id")),
                 PipelineName = Str(pipeline.N("name")),
                 RunId = runId,
                 RunName = Str(owner.N("name")),
@@ -136,7 +131,7 @@ public sealed class AzDoClient : IPipelineSource
     public async Task CompleteManualValidationAsync(ApprovalInfo validation, bool resume)
     {
         if (validation.ProjectId == "" || validation.PlanId == "" || validation.JobId == "")
-            throw new AzDoException(0, "Missing plan details for this run. Use Open instead.");
+            throw new PipelineException(0, "Missing plan details for this run. Use Open instead.");
 
         var body = new JsonObject
         {
@@ -155,17 +150,17 @@ public sealed class AzDoClient : IPipelineSource
             var record = timeline.FirstOrDefault(r => r.Id.Equals(validation.Id, StringComparison.OrdinalIgnoreCase));
             if (record == null || record.State != "inProgress") return;
         }
-        throw new AzDoException(0, "Azure DevOps accepted the request, but the step is still waiting. Use Open → Review instead.");
+        throw new PipelineException(0, "Azure DevOps accepted the request, but the step is still waiting. Use Open → Review instead.");
     }
 
-    public string RunUrl(string project, int buildId) => $"{BaseUrl}/{Esc(project)}/_build/results?buildId={buildId}";
+    public string RunUrl(string project, long buildId) => $"{BaseUrl}/{Esc(project)}/_build/results?buildId={buildId}";
 
     public void Dispose() => _http.Dispose();
 
     async Task<JsonNode?> ApprovalRequestAsync(Func<string, Task<JsonNode?>> send)
     {
         if (_approvalApiVersion != null) return await send(_approvalApiVersion);
-        AzDoException? last = null;
+        PipelineException? last = null;
         foreach (var version in ApprovalApiVersions)
         {
             try
@@ -174,7 +169,7 @@ public sealed class AzDoClient : IPipelineSource
                 _approvalApiVersion = version;
                 return result;
             }
-            catch (AzDoException ex) when (ex.StatusCode is 400 or 404)
+            catch (PipelineException ex) when (ex.StatusCode is 400 or 404)
             {
                 last = ex;
             }
@@ -196,11 +191,11 @@ public sealed class AzDoClient : IPipelineSource
         }
         catch (TaskCanceledException)
         {
-            throw new AzDoException(0, "The request timed out.");
+            throw new PipelineException(0, "The request timed out.");
         }
         catch (HttpRequestException ex)
         {
-            throw new AzDoException(0, ex.Message);
+            throw new PipelineException(0, ex.Message);
         }
 
         using (response)
@@ -209,7 +204,7 @@ public sealed class AzDoClient : IPipelineSource
             var retryAfter = RetryAfter(response);
             if (retryAfter != null) _limiter.BlockFor(retryAfter.Value);
             if (response.StatusCode == HttpStatusCode.TooManyRequests)
-                throw new AzDoException(429, retryAfter is { } wait
+                throw new PipelineException(429, retryAfter is { } wait
                     ? $"Azure DevOps is throttling requests. Retrying after {Math.Ceiling(wait.TotalSeconds)}s."
                     : "Azure DevOps is throttling requests.");
 
@@ -218,9 +213,9 @@ public sealed class AzDoClient : IPipelineSource
             // A bad PAT on dev.azure.com yields 203 + an HTML sign-in page rather than a 401.
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.NonAuthoritativeInformation
                 || (response.IsSuccessStatusCode && text.Length > 0 && !mediaType.Contains("json")))
-                throw new AzDoException(401, "Authentication failed. Check the server URL and access token.");
+                throw new PipelineException(401, "Authentication failed. Check the server URL and access token.");
             if (!response.IsSuccessStatusCode)
-                throw new AzDoException((int)response.StatusCode,
+                throw new PipelineException((int)response.StatusCode,
                     ErrorMessage(text) ?? $"{(int)response.StatusCode} {response.ReasonPhrase}");
             return string.IsNullOrWhiteSpace(text) ? null : JsonNode.Parse(text);
         }
@@ -229,7 +224,7 @@ public sealed class AzDoClient : IPipelineSource
     BuildInfo ParseBuild(JsonNode b)
     {
         var project = Str(b.N("project").N("name"));
-        var id = Int(b.N("id"));
+        var id = Long(b.N("id"));
         var web = Str(b.N("_links").N("web").N("href"));
         return new BuildInfo
         {
@@ -238,7 +233,7 @@ public sealed class AzDoClient : IPipelineSource
             Status = Str(b.N("status")),
             Result = Str(b.N("result")) is "" or "none" ? null : Str(b.N("result")),
             Project = project,
-            DefinitionId = Int(b.N("definition").N("id")),
+            DefinitionId = Long(b.N("definition").N("id")),
             DefinitionName = Str(b.N("definition").N("name")),
             Branch = Str(b.N("sourceBranch")),
             RequestedFor = Str(b.N("requestedFor").N("displayName")),
@@ -251,43 +246,8 @@ public sealed class AzDoClient : IPipelineSource
         };
     }
 
-    static TimeSpan? RetryAfter(HttpResponseMessage response) => response.Headers.RetryAfter switch
-    {
-        { Delta: { } delta } => delta,
-        { Date: { } date } when date > DateTimeOffset.UtcNow => date - DateTimeOffset.UtcNow,
-        _ => null,
-    };
-
-    static string? ErrorMessage(string text)
-    {
-        try { return JsonNode.Parse(text).N("message") is { } m ? Str(m) : null; }
-        catch { return null; }
-    }
-
     static IEnumerable<JsonNode> Items(JsonNode? json) =>
         (json.N("value") as JsonArray)?.OfType<JsonNode>() ?? [];
 
     static string Esc(string s) => Uri.EscapeDataString(s);
-
-    static string Str(JsonNode? n) => n switch
-    {
-        null => "",
-        JsonValue v when v.TryGetValue<string>(out var s) => s,
-        _ => n.ToJsonString(),
-    };
-
-    static int Int(JsonNode? n) => int.TryParse(Str(n), out var i) ? i : 0;
-
-    static string? NullIfEmpty(string s) => s == "" ? null : s;
-
-    static DateTime? Date(JsonNode? n) =>
-        DateTime.TryParse(Str(n), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var d)
-            ? d.Kind == DateTimeKind.Local ? d : d.ToLocalTime()
-            : null;
-}
-
-static class JsonExtensions
-{
-    /// <summary>Null-safe property access that tolerates non-object nodes.</summary>
-    public static JsonNode? N(this JsonNode? node, string key) => (node as JsonObject)?[key];
 }

@@ -1,6 +1,8 @@
 # DevOps Watcher
 
-A small Windows tray app that watches selected Azure DevOps pipelines.
+<img src="assets/app.png" width="96" alt="DevOps Watcher icon">
+
+A small Windows tray app that watches selected Azure DevOps pipelines and GitHub Actions workflows, on one or more servers.
 
 | Tray icon | Meaning |
 |---|---|
@@ -53,13 +55,25 @@ Run with `--demo` to try the UI with fake pipelines and no server. A deployment 
 
 ## Setup
 
-1. Settings opens on first run. Enter the organization URL (`https://dev.azure.com/yourorg`) or, for Azure DevOps Server, the collection URL (`https://tfs.company.com/tfs/DefaultCollection`).
+On first run Settings opens with **Add server**. Add as many servers as you like; Settings lists them with Add / Edit / Remove.
+
+**Azure DevOps**
+
+1. Enter the organization URL (`https://dev.azure.com/yourorg`) or, for Azure DevOps Server, the collection URL (`https://tfs.company.com/tfs/DefaultCollection`).
 2. Sign in with a **PAT** with these scopes: *Build (Read & execute)* and *Project and Team (Read)*. On-prem servers can use Windows authentication instead.
 3. Click **Connect**, expand projects, and tick the pipelines you want to track.
 
-Settings are saved in `%APPDATA%\DevOpsWatcher\settings.json`. The PAT is encrypted with Windows DPAPI for your user.
+**GitHub Actions**
+
+1. Keep `https://github.com`, or enter your GitHub Enterprise URL (`https://github.company.com` or `https://company.ghe.com`).
+2. Use a fine-grained token with repository permissions *Actions (Read)* and *Deployments (Read & write)*, or a classic token with the `repo` scope. Approving needs the write permission and that you're a required reviewer on the environment.
+3. Click **Connect**, expand repositories, and tick the workflows you want to track.
+
+Settings are saved in `%APPDATA%\DevOpsWatcher\settings.json`. Tokens are encrypted with Windows DPAPI for your user. Settings from older versions (one Azure DevOps server) are moved into the server list on first start.
 
 ## Notes
+
+- **GitHub Actions:** runs map to builds and jobs show as the stage dots. Environment reviews (*required reviewers*) are the approvals; you can approve or reject them from the popup when you're a reviewer. Environments with only a wait timer aren't shown as approvals. Unchanged responses are served from GitHub's ETag cache and don't count against the 5,000 requests/hour limit.
 
 - Approvals use the YAML pipeline approvals API (environment approvals and checks). Classic Release pipelines are not covered.
 - `ManualValidation` steps (agentless jobs) are detected from the build timeline and pop up like approvals. By default you resume or reject them in the browser (Open → Review).

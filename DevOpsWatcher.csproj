@@ -10,6 +10,7 @@
     <AssemblyName>DevOpsWatcher</AssemblyName>
     <RootNamespace>DevOpsWatcher</RootNamespace>
     <Version>1.0.0</Version>
+    <ApplicationIcon>assets\app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <!-- Published exe: trim unused framework code and compress the single file (~116 MB -> ~17 MB).
@@ -19,5 +20,11 @@
     <_SuppressWinFormsTrimError>true</_SuppressWinFormsTrimError>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- assets/make-icon.cs is a standalone file-based app that regenerates app.ico; see its header. -->
+    <Compile Remove="assets\**" />
+    <EmbeddedResource Include="assets\app.ico" LogicalName="app.ico" />
+  </ItemGroup>
 
 </Project>

@@ -124,15 +124,13 @@ public sealed class AppSettings
     static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "DevOpsWatcher", "settings.json");
 
-    static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
-
     public static AppSettings Load()
     {
         try
         {
             if (File.Exists(FilePath))
             {
-                var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath), JsonOptions) ?? new();
+                var settings = JsonSerializer.Deserialize(File.ReadAllText(FilePath), SettingsJsonContext.Default.AppSettings) ?? new();
                 settings.MigrateLegacy();
                 return settings;
             }
@@ -164,9 +162,14 @@ public sealed class AppSettings
     public void Save()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
-        File.WriteAllText(FilePath, JsonSerializer.Serialize(this, JsonOptions));
+        File.WriteAllText(FilePath, JsonSerializer.Serialize(this, SettingsJsonContext.Default.AppSettings));
     }
 }
+
+/// <summary>Source-generated serializer, so settings survive trimming.</summary>
+[JsonSourceGenerationOptions(WriteIndented = true)]
+[JsonSerializable(typeof(AppSettings))]
+partial class SettingsJsonContext : JsonSerializerContext;
 
 static class Startup
 {

@@ -13,6 +13,14 @@
     <ApplicationIcon>assets\app.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <!-- Published exe: trim unused framework code and compress the single file (~116 MB -> ~17 MB).
+       WinForms isn't officially trim-supported, hence the suppression; JSON uses source generation to stay trim-safe. -->
+  <PropertyGroup>
+    <PublishTrimmed>true</PublishTrimmed>
+    <_SuppressWinFormsTrimError>true</_SuppressWinFormsTrimError>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- assets/make-icon.cs is a standalone file-based app that regenerates app.ico; see its header. -->
     <Compile Remove="assets\**" />

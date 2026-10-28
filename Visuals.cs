@@ -140,6 +140,9 @@ static class IconFactory
 {
     static readonly Dictionary<string, Icon> Cache = [];
 
+    /// <summary>The app icon (assets/app.ico) for windows; the tray uses the status icons below.</summary>
+    public static readonly Icon App = new(typeof(IconFactory).Assembly.GetManifestResourceStream("app.ico")!);
+
     /// <summary>Icons are cached (bounded set of states/frames), so their GDI handles are intentionally never freed.</summary>
     public static Icon Get(TrayState state, int frame, bool failureDot)
     {

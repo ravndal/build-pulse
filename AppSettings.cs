@@ -29,6 +29,9 @@ public sealed class ServerConfig
     public string Url { get; set; } = "";
     /// <summary>Azure DevOps Server only.</summary>
     public bool UseWindowsAuth { get; set; }
+    /// <summary>Azure DevOps Services only: when set, setup lists just this project of the organization.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Project { get; set; }
     /// <summary>PAT encrypted with DPAPI for the current Windows user.</summary>
     public string? ProtectedPat { get; set; }
     public List<TrackedPipeline> Pipelines { get; set; } = [];
@@ -74,6 +77,7 @@ public sealed class ServerConfig
         Kind = Kind,
         Url = Url,
         UseWindowsAuth = UseWindowsAuth,
+        Project = Project,
         ProtectedPat = ProtectedPat,
         Pipelines = Pipelines.Select(p => new TrackedPipeline { Project = p.Project, DefinitionId = p.DefinitionId, Name = p.Name }).ToList(),
     };
@@ -106,8 +110,8 @@ public sealed class AppSettings
     public List<ServerConfig> Servers { get; set; } = [];
     public int PollSeconds { get; set; } = 20;
     public bool ShowStatusPopups { get; set; } = true;
-    /// <summary>Install new releases from GitHub automatically when no approval is waiting.</summary>
-    public bool AutoUpdate { get; set; } = true;
+    /// <summary>Dashboard panels (see <c>DashboardForm.Group.Key</c>) the user collapsed to status icons.</summary>
+    public List<string> CollapsedPanels { get; set; } = [];
     /// <summary>Experimental: Resume/Reject ManualValidation steps from the popup via an undocumented use of plan events.</summary>
     public bool EnableManualValidationActions { get; set; }
     public RateLimitSettings RateLimits { get; set; } = new();

@@ -244,9 +244,10 @@ static class ProviderLogo
     static readonly GraphicsPath AzurePath = SvgPath.Parse(AzureDevOps);
     static readonly GraphicsPath GitHubPath = SvgPath.Parse(GitHub);
 
-    public static void Draw(Graphics g, RectangleF r, ServerKind kind)
+    /// <param name="onLight">Draws the GitHub mark dark, for light backgrounds.</param>
+    public static void Draw(Graphics g, RectangleF r, ServerKind kind, bool onLight = false)
     {
-        var (path, viewBox, color) = kind == ServerKind.GitHub ? (GitHubPath, 16f, Palette.Text) : (AzurePath, 18f, AzureBlue);
+        var (path, viewBox, color) = kind == ServerKind.GitHub ? (GitHubPath, 16f, onLight ? Color.FromArgb(0x1F, 0x23, 0x28) : Palette.Text) : (AzurePath, 18f, AzureBlue);
         var state = g.Save();
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TranslateTransform(r.X, r.Y);

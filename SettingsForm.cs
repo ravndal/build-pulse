@@ -170,7 +170,7 @@ sealed class SettingsForm : Form
             Servers = _servers,
             PollSeconds = (int)_poll.Value,
             ShowStatusPopups = _popups.Checked,
-            AutoUpdate = _current.AutoUpdate,
+            CollapsedPanels = _current.CollapsedPanels,
             EnableManualValidationActions = _validationActions.Checked,
             RateLimits = _rateLimits,
         };

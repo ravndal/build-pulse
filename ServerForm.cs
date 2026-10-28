@@ -143,7 +143,7 @@ sealed partial class ServerForm : Form
         _pat.Enabled = _usePat.Checked;
         ApplyTarget(_target);
         if (_adding) ShowPicker();
-        else _picker.Visible = false;
+        else { _picker.Visible = false; AcceptButton = _ok; }
         UpdateTrackedCount();
         Shown += async (_, _) =>
         {

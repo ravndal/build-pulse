@@ -153,7 +153,7 @@ public sealed class GitHubClient : IPipelineSource
                     DefinitionId = Long(run.N("workflow_id")),
                     PipelineName = Str(run.N("name")),
                     RunId = runId,
-                    RunName = $"#{Str(run.N("run_number"))}",
+                    RunName = Str(run.N("run_number")),
                     StageName = NullIfEmpty(Str(pending.N("environment").N("name"))),
                     CreatedOn = Date(run.N("updated_at")),
                     Approvers = reviewers,

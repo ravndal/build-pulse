@@ -553,7 +553,7 @@ sealed class TrayApp : ApplicationContext
     }
 
     DashboardModel CreateModel() =>
-        new(_builds.Take(DashboardForm.MaxBuilds).ToList(), _approvals, _stages, _stageStatuses, _lastPoll, _error, _state);
+        new(_settings.Servers, _builds, _approvals, _stages, _stageStatuses, _lastPoll, _error, _state);
 
     void ToggleDashboard()
     {

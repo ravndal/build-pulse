@@ -2,10 +2,18 @@ using System.Media;
 
 namespace DevOpsWatcher;
 
-/// <summary>Owns the tray icon, polls Azure DevOps, diffs state and raises popups.</summary>
+/// <summary>Owns the tray icon, polls every configured server, diffs state and raises popups.</summary>
 sealed class TrayApp : ApplicationContext
 {
     sealed record BuildSnapshot(string Status, string? Result, string? Stage);
+
+    /// <summary>What one server returned in one poll.</summary>
+    sealed record ServerPoll(
+        List<BuildInfo> Builds,
+        List<ApprovalInfo> Approvals,
+        Dictionary<string, string> Stages,
+        Dictionary<string, IReadOnlyList<StageStatus>> StageStatuses,
+        List<string> Warnings);
 
     readonly bool _demo;
     readonly NotifyIcon _tray;
@@ -16,7 +24,7 @@ sealed class TrayApp : ApplicationContext
     readonly System.Windows.Forms.Timer _animTimer = new() { Interval = 120 };
     readonly DateTime _startedAt = DateTime.Now;
 
-    readonly Dictionary<int, BuildSnapshot> _known = [];
+    readonly Dictionary<string, BuildSnapshot> _known = [];
     readonly Dictionary<string, ApprovalForm> _approvalForms = [];
     /// <summary>Approvals the user snoozed: no popup until the time passes.</summary>
     readonly Dictionary<string, DateTime> _snoozedUntil = [];
@@ -24,12 +32,13 @@ sealed class TrayApp : ApplicationContext
     readonly Dictionary<string, DateTime> _decidedUntil = [];
 
     AppSettings _settings;
-    IPipelineSource? _source;
+    /// <summary>One source per <see cref="ServerConfig.Id"/>; replaced as a whole when settings change.</summary>
+    Dictionary<string, IPipelineSource> _sources = [];
     SettingsForm? _settingsForm;
     List<BuildInfo> _builds = [];
     List<ApprovalInfo> _approvals = [];
-    Dictionary<int, string> _stages = [];
-    Dictionary<int, IReadOnlyList<StageStatus>> _stageStatuses = [];
+    Dictionary<string, string> _stages = [];
+    Dictionary<string, IReadOnlyList<StageStatus>> _stageStatuses = [];
     string? _error;
     bool _pollFailed, _baselined, _polling, _failureDot;
     DateTime? _lastPoll;
@@ -174,8 +183,8 @@ sealed class TrayApp : ApplicationContext
         _settings = settings;
         _muteItem.Checked = !settings.ShowStatusPopups;
 
-        _source?.Dispose();
-        _source = null;
+        foreach (var source in _sources.Values) source.Dispose();
+        _sources = [];
         foreach (var form in _approvalForms.Values.ToList()) form.Close();
         _known.Clear();
         _baselined = false;
@@ -187,10 +196,8 @@ sealed class TrayApp : ApplicationContext
         _pollFailed = false;
         _lastPoll = null;
 
-        if (_demo && settings.ServerUrl == DemoSource.Url)
-            _source = new DemoSource();
-        else if (settings.ServerUrl != "" && settings.HasCredentials)
-            _source = new AzDoClient(settings.ServerUrl, settings.UseWindowsAuth, settings.Pat, settings.RateLimits);
+        foreach (var server in settings.Servers.Where(s => s.Url != "" && s.HasCredentials))
+            _sources[server.Id] = server.CreateSource(settings.RateLimits, _demo);
 
         _pollTimer.Interval = Math.Max(10, settings.PollSeconds) * 1000;
         _pollTimer.Start();
@@ -202,109 +209,52 @@ sealed class TrayApp : ApplicationContext
 
     async Task PollAsync()
     {
-        if (_polling || _source == null || _settings.Pipelines.Count == 0) return;
+        if (_polling || _sources.Count == 0 || !HasPipelines) return;
         _polling = true;
-        var source = _source;
+        var sources = _sources;
         try
         {
             var builds = new List<BuildInfo>();
             var approvals = new List<ApprovalInfo>();
+            var stages = new Dictionary<string, string>();
+            var stageStatuses = new Dictionary<string, IReadOnlyList<StageStatus>>();
             var warnings = new List<string>();
-            bool approvalsApiFailed = false;
+            var failures = new List<string>();
 
-            foreach (var group in _settings.Pipelines.GroupBy(p => p.Project, StringComparer.OrdinalIgnoreCase))
+            foreach (var server in _settings.Servers)
             {
-                var ids = group.Select(p => p.DefinitionId).Distinct().ToList();
-                builds.AddRange(await source.GetBuildsAsync(group.Key, ids, Math.Clamp(ids.Count * 8, 25, 200)));
+                if (server.Pipelines.Count == 0 || !sources.TryGetValue(server.Id, out var source)) continue;
                 try
                 {
-                    var pending = await source.GetPendingApprovalsAsync(group.Key);
-                    approvals.AddRange(pending.Where(a => ids.Contains(a.DefinitionId)));
+                    var poll = await PollServerAsync(server, source);
+                    builds.AddRange(poll.Builds);
+                    approvals.AddRange(poll.Approvals);
+                    foreach (var (key, stage) in poll.Stages) stages[key] = stage;
+                    foreach (var (key, list) in poll.StageStatuses) stageStatuses[key] = list;
+                    warnings.AddRange(poll.Warnings.Select(w => Prefix(server, w)));
                 }
-                catch (AzDoException ex)
+                catch (Exception ex)
                 {
-                    approvalsApiFailed = true;
-                    warnings.Add($"Approvals unavailable: {ex.Message}");
-                    Log.Write($"Approvals query failed for '{group.Key}': {ex.StatusCode} {ex.Message}");
+                    if (sources != _sources) return; // settings changed mid-poll
+                    Log.Write($"Poll failed for {server.DisplayName}: {ex.GetType().Name}: {ex.Message}");
+                    failures.Add(Prefix(server, ex.Message));
+                    // Keep what we last knew so a flaky server's runs don't vanish and then pop up again as new.
+                    var prefix = server.Id + "|";
+                    builds.AddRange(_builds.Where(b => b.ServerId == server.Id));
+                    approvals.AddRange(_approvals.Where(a => a.ServerId == server.Id));
+                    foreach (var (key, stage) in _stages.Where(kv => kv.Key.StartsWith(prefix, StringComparison.Ordinal))) stages[key] = stage;
+                    foreach (var (key, list) in _stageStatuses.Where(kv => kv.Key.StartsWith(prefix, StringComparison.Ordinal))) stageStatuses[key] = list;
                 }
             }
 
-            builds = builds.GroupBy(b => b.Id).Select(g => g.First())
-                .OrderByDescending(b => b.QueueTime ?? DateTime.MinValue).ToList();
-
-            // Timelines of running builds give the current stage and the stage an approval is waiting in.
-            var stages = new Dictionary<int, string>();
-            var stageStatuses = new Dictionary<int, IReadOnlyList<StageStatus>>();
-            foreach (var build in builds.Where(b => b.IsActive))
-            {
-                List<TimelineRecord> timeline;
-                try { timeline = await source.GetTimelineAsync(build.Project, build.Id); }
-                catch (AzDoException ex)
-                {
-                    Log.Write($"Timeline failed for build {build.Id}: {ex.StatusCode} {ex.Message}");
-                    continue;
-                }
-
-                if (CurrentStage(timeline) is { } stage) stages[build.Id] = stage;
-                if (StageStatuses(timeline) is { Count: > 0 } statuses) stageStatuses[build.Id] = statuses;
-                foreach (var approval in approvals.Where(a => a.RunId == build.Id))
-                {
-                    approval.StageName ??= StageOf(timeline, timeline.FirstOrDefault(r => r.Id == approval.Id));
-                    if (approval.RunName == "") approval.RunName = build.Number;
-                    if (approval.PipelineName == "") approval.PipelineName = build.DefinitionName;
-                }
-
-                if (approvalsApiFailed)
-                {
-                    // Fall back to the timeline so the tray still flags runs waiting for approval.
-                    foreach (var checkpoint in timeline.Where(r => r.Type == "Checkpoint.Approval" && r.State == "inProgress"))
-                        approvals.Add(new ApprovalInfo
-                        {
-                            Id = checkpoint.Id,
-                            Project = build.Project,
-                            DefinitionId = build.DefinitionId,
-                            PipelineName = build.DefinitionName,
-                            RunId = build.Id,
-                            RunName = build.Number,
-                            StageName = StageOf(timeline, checkpoint),
-                            CreatedOn = checkpoint.StartTime,
-                            WebUrl = build.WebUrl,
-                            CanApprove = false,
-                            BrowserHint = "Approve this run in the browser (your token can't read approvals).",
-                        });
-                }
-
-                // ManualValidation steps in agentless jobs pause the run like an approval but aren't in the approvals API.
-                foreach (var task in timeline.Where(IsWaitingManualValidation))
-                    approvals.Add(new ApprovalInfo
-                    {
-                        Kind = ApprovalKind.ManualValidation,
-                        ProjectId = build.ProjectId,
-                        PlanId = build.PlanId,
-                        JobId = task.ParentId ?? "",
-                        Id = task.Id,
-                        Project = build.Project,
-                        DefinitionId = build.DefinitionId,
-                        PipelineName = build.DefinitionName,
-                        RunId = build.Id,
-                        RunName = build.Number,
-                        StageName = StageOf(timeline, task) is { } s ? $"{s} · {task.Name}" : task.Name,
-                        CreatedOn = task.StartTime,
-                        WebUrl = build.WebUrl,
-                        CanApprove = _settings.EnableManualValidationActions && build.PlanId != "" && task.ParentId != null,
-                        BrowserHint = "This is a Manual validation step. Open the run and choose Review to resume or reject it.",
-                    });
-            }
-
-            foreach (var approval in approvals.Where(a => a.WebUrl == ""))
-                approval.WebUrl = builds.FirstOrDefault(b => b.Id == approval.RunId)?.WebUrl ?? "";
+            builds = builds.OrderByDescending(b => b.QueueTime ?? DateTime.MinValue).ToList();
 
             var now = DateTime.Now;
             foreach (var expired in _decidedUntil.Where(kv => kv.Value < now).Select(kv => kv.Key).ToList())
                 _decidedUntil.Remove(expired);
-            approvals = approvals.Where(a => !_decidedUntil.ContainsKey(a.Id)).ToList();
+            approvals = approvals.Where(a => !_decidedUntil.ContainsKey(a.Key)).ToList();
 
-            if (source != _source) return; // settings changed mid-poll
+            if (sources != _sources) return; // settings changed mid-poll
             DiffBuilds(builds, stages);
             SyncApprovals(approvals);
 
@@ -312,16 +262,16 @@ sealed class TrayApp : ApplicationContext
             _stages = stages;
             _stageStatuses = stageStatuses;
             _approvals = approvals;
-            _error = warnings.FirstOrDefault();
-            _pollFailed = false;
+            _error = failures.FirstOrDefault() ?? warnings.FirstOrDefault();
+            _pollFailed = failures.Count > 0;
             _lastPoll = DateTime.Now;
-            Log.Write($"Poll ok: {builds.Count} builds ({builds.Count(b => b.IsActive)} active), {approvals.Count} approvals"
-                + string.Concat(builds.Where(b => b.IsActive).Select(b => $" | {b.DefinitionName} #{b.Number} {b.Status} stage='{stages.GetValueOrDefault(b.Id)}'"))
+            Log.Write($"Poll ok: {builds.Count} builds ({builds.Count(b => b.IsActive)} active), {approvals.Count} approvals, {failures.Count} server(s) failed"
+                + string.Concat(builds.Where(b => b.IsActive).Select(b => $" | {b.DefinitionName} #{b.Number} {b.Status} stage='{stages.GetValueOrDefault(b.Key)}'"))
                 + string.Concat(approvals.Select(a => $" | approval {a.PipelineName} run={a.RunId} stage='{a.StageName}' canApprove={a.CanApprove}")));
         }
         catch (Exception ex)
         {
-            if (source != _source) return;
+            if (sources != _sources) return;
             Log.Write($"Poll failed: {ex.GetType().Name}: {ex.Message}");
             _error = ex.Message;
             _pollFailed = true;
@@ -333,14 +283,120 @@ sealed class TrayApp : ApplicationContext
         }
     }
 
-    void DiffBuilds(List<BuildInfo> builds, Dictionary<int, string> stages)
+    bool HasPipelines => _settings.Servers.Any(s => s.Pipelines.Count > 0);
+
+    /// <summary>Names the server in messages once there's more than one.</summary>
+    string Prefix(ServerConfig server, string message) =>
+        _settings.Servers.Count > 1 ? $"{server.DisplayName}: {message}" : message;
+
+    async Task<ServerPoll> PollServerAsync(ServerConfig server, IPipelineSource source)
+    {
+        var builds = new List<BuildInfo>();
+        var approvals = new List<ApprovalInfo>();
+        var warnings = new List<string>();
+        bool approvalsApiFailed = false;
+
+        foreach (var group in server.Pipelines.GroupBy(p => p.Project, StringComparer.OrdinalIgnoreCase))
+        {
+            var ids = group.Select(p => p.DefinitionId).Distinct().ToList();
+            builds.AddRange(await source.GetBuildsAsync(group.Key, ids, Math.Clamp(ids.Count * 8, 25, 200)));
+            try
+            {
+                var pending = await source.GetPendingApprovalsAsync(group.Key);
+                approvals.AddRange(pending.Where(a => ids.Contains(a.DefinitionId)));
+            }
+            catch (PipelineException ex)
+            {
+                approvalsApiFailed = true;
+                warnings.Add($"Approvals unavailable: {ex.Message}");
+                Log.Write($"Approvals query failed for '{group.Key}': {ex.StatusCode} {ex.Message}");
+            }
+        }
+
+        builds = builds.GroupBy(b => b.Id).Select(g => g.First()).ToList();
+        foreach (var b in builds) b.ServerId = server.Id;
+        foreach (var a in approvals) a.ServerId = server.Id;
+
+        // Timelines of running builds give the current stage and the stage an approval is waiting in.
+        var stages = new Dictionary<string, string>();
+        var stageStatuses = new Dictionary<string, IReadOnlyList<StageStatus>>();
+        foreach (var build in builds.Where(b => b.IsActive))
+        {
+            List<TimelineRecord> timeline;
+            try { timeline = await source.GetTimelineAsync(build.Project, build.Id); }
+            catch (PipelineException ex)
+            {
+                Log.Write($"Timeline failed for build {build.Id}: {ex.StatusCode} {ex.Message}");
+                continue;
+            }
+
+            if (CurrentStage(timeline) is { } stage) stages[build.Key] = stage;
+            if (StageStatuses(timeline) is { Count: > 0 } statuses) stageStatuses[build.Key] = statuses;
+            foreach (var approval in approvals.Where(a => a.RunId == build.Id))
+            {
+                approval.StageName ??= StageOf(timeline, timeline.FirstOrDefault(r => r.Id == approval.Id));
+                if (approval.RunName == "") approval.RunName = build.Number;
+                if (approval.PipelineName == "") approval.PipelineName = build.DefinitionName;
+            }
+
+            if (approvalsApiFailed)
+            {
+                // Fall back to the timeline so the tray still flags runs waiting for approval.
+                foreach (var checkpoint in timeline.Where(r => r.Type == "Checkpoint.Approval" && r.State == "inProgress"))
+                    approvals.Add(new ApprovalInfo
+                    {
+                        ServerId = server.Id,
+                        Id = checkpoint.Id,
+                        Project = build.Project,
+                        DefinitionId = build.DefinitionId,
+                        PipelineName = build.DefinitionName,
+                        RunId = build.Id,
+                        RunName = build.Number,
+                        StageName = StageOf(timeline, checkpoint),
+                        CreatedOn = checkpoint.StartTime,
+                        WebUrl = build.WebUrl,
+                        CanApprove = false,
+                        BrowserHint = "Approve this run in the browser (your token can't read approvals).",
+                    });
+            }
+
+            // ManualValidation steps in agentless jobs pause the run like an approval but aren't in the approvals API.
+            foreach (var task in timeline.Where(IsWaitingManualValidation))
+                approvals.Add(new ApprovalInfo
+                {
+                    ServerId = server.Id,
+                    Kind = ApprovalKind.ManualValidation,
+                    ProjectId = build.ProjectId,
+                    PlanId = build.PlanId,
+                    JobId = task.ParentId ?? "",
+                    Id = task.Id,
+                    Project = build.Project,
+                    DefinitionId = build.DefinitionId,
+                    PipelineName = build.DefinitionName,
+                    RunId = build.Id,
+                    RunName = build.Number,
+                    StageName = StageOf(timeline, task) is { } s ? $"{s} · {task.Name}" : task.Name,
+                    CreatedOn = task.StartTime,
+                    WebUrl = build.WebUrl,
+                    CanApprove = _settings.EnableManualValidationActions && build.PlanId != "" && task.ParentId != null,
+                    BrowserHint = "This is a Manual validation step. Open the run and choose Review to resume or reject it.",
+                });
+        }
+
+        foreach (var approval in approvals.Where(a => a.WebUrl == ""))
+            approval.WebUrl = builds.FirstOrDefault(b => b.Id == approval.RunId)?.WebUrl ?? "";
+
+        return new ServerPoll(builds, approvals, stages, stageStatuses, warnings);
+    }
+
+    void DiffBuilds(List<BuildInfo> builds, Dictionary<string, string> stages)
     {
         foreach (var b in builds)
         {
-            stages.TryGetValue(b.Id, out var stage);
+            stages.TryGetValue(b.Key, out var stage);
             if (_baselined)
             {
-                if (!_known.TryGetValue(b.Id, out var old))
+                if (!_known.TryGetValue(b.Key, out var old))
                 {
                     if (b.IsActive)
                         Toast(Palette.Blue, $"{b.DefinitionName} {(b.Status == "inProgress" ? "started" : "queued")}", Fmt.BuildLine(b), b.WebUrl);
@@ -361,10 +417,10 @@ sealed class TrayApp : ApplicationContext
                     Toast(Palette.Blue, $"{b.DefinitionName} → {stage}", Fmt.BuildLine(b), b.WebUrl);
                 }
             }
-            _known[b.Id] = new BuildSnapshot(b.Status, b.Result, stage);
+            _known[b.Key] = new BuildSnapshot(b.Status, b.Result, stage);
         }
 
-        var current = builds.Select(b => b.Id).ToHashSet();
+        var current = builds.Select(b => b.Key).ToHashSet();
         foreach (var gone in _known.Keys.Where(id => !current.Contains(id)).ToList()) _known.Remove(gone);
         _baselined = true;
     }
@@ -377,7 +433,7 @@ sealed class TrayApp : ApplicationContext
 
     void SyncApprovals(List<ApprovalInfo> approvals)
     {
-        var pendingIds = approvals.Select(a => a.Id).ToHashSet();
+        var pendingIds = approvals.Select(a => a.Key).ToHashSet();
         foreach (var (id, form) in _approvalForms.Where(kv => !pendingIds.Contains(kv.Key)).ToList())
         {
             form.Close();
@@ -388,8 +444,8 @@ sealed class TrayApp : ApplicationContext
         var now = DateTime.Now;
         foreach (var a in approvals)
         {
-            if (_approvalForms.TryGetValue(a.Id, out var form)) { form.UpdateApproval(a); continue; }
-            if (_snoozedUntil.TryGetValue(a.Id, out var until) && until > now) continue;
+            if (_approvalForms.TryGetValue(a.Key, out var form)) { form.UpdateApproval(a); continue; }
+            if (_snoozedUntil.TryGetValue(a.Key, out var until) && until > now) continue;
             OpenApprovalForm(a, playSound: true);
         }
     }
@@ -397,34 +453,34 @@ sealed class TrayApp : ApplicationContext
     void ShowApproval(ApprovalInfo approval)
     {
         _dashboard.HideFlyout();
-        _snoozedUntil.Remove(approval.Id);
-        if (_approvalForms.TryGetValue(approval.Id, out var existing)) existing.Activate();
+        _snoozedUntil.Remove(approval.Key);
+        if (_approvalForms.TryGetValue(approval.Key, out var existing)) existing.Activate();
         else OpenApprovalForm(approval, playSound: false);
     }
 
     void OpenApprovalForm(ApprovalInfo approval, bool playSound)
     {
         var form = new ApprovalForm(approval) { Decide = DecideAsync };
-        form.Snoozed += a => _snoozedUntil[a.Id] = DateTime.Now.AddMinutes(15);
+        form.Snoozed += a => _snoozedUntil[a.Key] = DateTime.Now.AddMinutes(15);
         form.FormClosed += (_, _) =>
         {
-            if (_approvalForms.TryGetValue(approval.Id, out var current) && current == form)
-                _approvalForms.Remove(approval.Id);
+            if (_approvalForms.TryGetValue(approval.Key, out var current) && current == form)
+                _approvalForms.Remove(approval.Key);
         };
-        _approvalForms[approval.Id] = form;
+        _approvalForms[approval.Key] = form;
         PopupHost.Show(form, sticky: true);
         if (playSound) SystemSounds.Exclamation.Play();
     }
 
     async Task DecideAsync(ApprovalInfo approval, bool approve, string comment)
     {
-        if (_source == null) throw new InvalidOperationException("Not connected.");
+        if (!_sources.TryGetValue(approval.ServerId, out var source)) throw new InvalidOperationException("Not connected.");
         try
         {
             if (approval.Kind == ApprovalKind.ManualValidation)
-                await _source.CompleteManualValidationAsync(approval, resume: approve);
+                await source.CompleteManualValidationAsync(approval, resume: approve);
             else
-                await _source.UpdateApprovalAsync(approval.Project, approval.Id, approve, comment);
+                await source.UpdateApprovalAsync(approval.Project, approval.Id, approve, comment);
             Log.Write($"{approval.Kind} {approval.Id} {(approve ? "approved" : "rejected")}");
         }
         catch (Exception ex)
@@ -433,8 +489,8 @@ sealed class TrayApp : ApplicationContext
             throw;
         }
 
-        _decidedUntil[approval.Id] = DateTime.Now.AddMinutes(2);
-        _approvals.RemoveAll(a => a.Id == approval.Id);
+        _decidedUntil[approval.Key] = DateTime.Now.AddMinutes(2);
+        _approvals.RemoveAll(a => a.Key == approval.Key);
         UpdateState();
         var verb = approval.Kind == ApprovalKind.ManualValidation ? (approve ? "Resumed" : "Rejected") : (approve ? "Approved" : "Rejected");
         Toast(approve ? Palette.Green : Palette.Red, verb,
@@ -450,7 +506,7 @@ sealed class TrayApp : ApplicationContext
 
     void UpdateState()
     {
-        if (_source == null || _settings.Pipelines.Count == 0) _state = TrayState.Unconfigured;
+        if (_sources.Count == 0 || !HasPipelines) _state = TrayState.Unconfigured;
         else if (_approvals.Count > 0) _state = TrayState.Approval;
         else if (_pollFailed) _state = TrayState.Error;
         else if (_builds.Any(b => b.IsActive)) _state = TrayState.Running;
@@ -458,7 +514,7 @@ sealed class TrayApp : ApplicationContext
 
         // Red dot when the most recent finished run of any tracked pipeline failed.
         _failureDot = _builds.Where(b => b.Status == "completed")
-            .GroupBy(b => b.DefinitionId)
+            .GroupBy(b => b.DefinitionKey)
             .Any(g => g.OrderByDescending(b => b.FinishTime).First().Result == "failed");
 
         bool animate = _state is TrayState.Running or TrayState.Approval;
@@ -497,7 +553,7 @@ sealed class TrayApp : ApplicationContext
     }
 
     DashboardModel CreateModel() =>
-        new(_builds.Take(DashboardForm.MaxBuilds).ToList(), _approvals, _stages, _stageStatuses, _lastPoll, _error, _state);
+        new(_settings.Servers, _builds, _approvals, _stages, _stageStatuses, _lastPoll, _error, _state);
 
     void ToggleDashboard()
     {
@@ -514,7 +570,7 @@ sealed class TrayApp : ApplicationContext
             _settingsForm.Activate();
             return;
         }
-        _settingsForm = new SettingsForm(_settings);
+        _settingsForm = new SettingsForm(_settings, _demo);
         _settingsForm.FormClosed += (_, _) =>
         {
             var result = _settingsForm?.Result;
@@ -582,7 +638,7 @@ sealed class TrayApp : ApplicationContext
         _updateTimer.Stop();
         _tray.Visible = false;
         _tray.Dispose();
-        _source?.Dispose();
+        foreach (var source in _sources.Values) source.Dispose();
         base.ExitThreadCore();
     }
 }

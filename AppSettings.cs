@@ -10,10 +10,73 @@ namespace DevOpsWatcher;
 public sealed class TrackedPipeline
 {
     public string Project { get; set; } = "";
-    public int DefinitionId { get; set; }
+    public long DefinitionId { get; set; }
     public string Name { get; set; } = "";
 
     public string Key => $"{Project.ToLowerInvariant()}|{DefinitionId}";
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<ServerKind>))]
+public enum ServerKind { AzureDevOps, GitHub }
+
+/// <summary>One server to watch and the pipelines tracked on it.</summary>
+public sealed class ServerConfig
+{
+    public const string GitHubUrl = "https://github.com";
+
+    public string Id { get; set; } = Guid.NewGuid().ToString("N")[..8];
+    public ServerKind Kind { get; set; }
+    public string Url { get; set; } = "";
+    /// <summary>Azure DevOps Server only.</summary>
+    public bool UseWindowsAuth { get; set; }
+    /// <summary>PAT encrypted with DPAPI for the current Windows user.</summary>
+    public string? ProtectedPat { get; set; }
+    public List<TrackedPipeline> Pipelines { get; set; } = [];
+
+    [JsonIgnore]
+    public string? Pat
+    {
+        get => Dpapi.Unprotect(ProtectedPat);
+        set => ProtectedPat = Dpapi.Protect(value);
+    }
+
+    [JsonIgnore]
+    public bool HasCredentials => (UseWindowsAuth && Kind == ServerKind.AzureDevOps) || ProtectedPat != null;
+
+    [JsonIgnore]
+    public string KindName => KindNameOf(Kind);
+
+    /// <summary>The URL without scheme, e.g. "dev.azure.com/yourorg" or "github.com".</summary>
+    [JsonIgnore]
+    public string DisplayName
+    {
+        get
+        {
+            var url = Url.Trim().TrimEnd('/');
+            int scheme = url.IndexOf("://", StringComparison.Ordinal);
+            return scheme >= 0 ? url[(scheme + 3)..] : url;
+        }
+    }
+
+    public static string KindNameOf(ServerKind kind) => kind == ServerKind.GitHub ? "GitHub Actions" : "Azure DevOps";
+
+    public IPipelineSource CreateSource(RateLimitSettings rateLimits, bool demo = false)
+    {
+        if (demo && Url == DemoSource.Url) return new DemoSource();
+        return Kind == ServerKind.GitHub
+            ? new GitHubClient(Url, Pat, rateLimits)
+            : new AzDoClient(Url, UseWindowsAuth, Pat, rateLimits);
+    }
+
+    public ServerConfig Clone() => new()
+    {
+        Id = Id,
+        Kind = Kind,
+        Url = Url,
+        UseWindowsAuth = UseWindowsAuth,
+        ProtectedPat = ProtectedPat,
+        Pipelines = Pipelines.Select(p => new TrackedPipeline { Project = p.Project, DefinitionId = p.DefinitionId, Name = p.Name }).ToList(),
+    };
 }
 
 public sealed class RateLimit
@@ -40,31 +103,23 @@ public sealed class RateLimitSettings
 
 public sealed class AppSettings
 {
-    public string ServerUrl { get; set; } = "";
-    public bool UseWindowsAuth { get; set; }
-    /// <summary>PAT encrypted with DPAPI for the current Windows user.</summary>
-    public string? ProtectedPat { get; set; }
+    public List<ServerConfig> Servers { get; set; } = [];
     public int PollSeconds { get; set; } = 20;
     public bool ShowStatusPopups { get; set; } = true;
     /// <summary>Install new releases from GitHub automatically when no approval is waiting.</summary>
     public bool AutoUpdate { get; set; } = true;
     /// <summary>Experimental: Resume/Reject ManualValidation steps from the popup via an undocumented use of plan events.</summary>
     public bool EnableManualValidationActions { get; set; }
-    public List<TrackedPipeline> Pipelines { get; set; } = [];
     public RateLimitSettings RateLimits { get; set; } = new();
 
-    [JsonIgnore]
-    public string? Pat
-    {
-        get => Dpapi.Unprotect(ProtectedPat);
-        set => ProtectedPat = Dpapi.Protect(value);
-    }
+    // Single-server settings from before Servers existed; moved into Servers on load and not written back.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? ServerUrl { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public bool? UseWindowsAuth { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public string? ProtectedPat { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] public List<TrackedPipeline>? Pipelines { get; set; }
 
     [JsonIgnore]
-    public bool HasCredentials => UseWindowsAuth || ProtectedPat != null;
-
-    [JsonIgnore]
-    public bool IsConfigured => ServerUrl != "" && HasCredentials && Pipelines.Count > 0;
+    public bool IsConfigured => Servers.Any(s => s.Url != "" && s.HasCredentials && s.Pipelines.Count > 0);
 
     static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "DevOpsWatcher", "settings.json");
@@ -76,13 +131,34 @@ public sealed class AppSettings
         try
         {
             if (File.Exists(FilePath))
-                return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath), JsonOptions) ?? new();
+            {
+                var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath), JsonOptions) ?? new();
+                settings.MigrateLegacy();
+                return settings;
+            }
         }
         catch
         {
             // Corrupt settings: start fresh rather than crash.
         }
         return new();
+    }
+
+    void MigrateLegacy()
+    {
+        if (!string.IsNullOrEmpty(ServerUrl) && Servers.Count == 0)
+            Servers.Add(new ServerConfig
+            {
+                Kind = ServerKind.AzureDevOps,
+                Url = ServerUrl,
+                UseWindowsAuth = UseWindowsAuth ?? false,
+                ProtectedPat = ProtectedPat,
+                Pipelines = Pipelines ?? [],
+            });
+        ServerUrl = null;
+        UseWindowsAuth = null;
+        ProtectedPat = null;
+        Pipelines = null;
     }
 
     public void Save()

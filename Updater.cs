@@ -10,7 +10,7 @@ namespace DevOpsWatcher;
 sealed record UpdateInfo(Version Version, string ReleaseUrl, string FilePath);
 
 /// <summary>Checks GitHub releases for a newer DevOpsWatcher.exe, downloads it and swaps it in place.</summary>
-static class Updater
+static partial class Updater
 {
     const string Repo = "ravndal/devops-pipline-watcher";
     const string AssetName = "DevOpsWatcher.exe";
@@ -42,6 +42,9 @@ static class Updater
         [JsonPropertyName("digest")] public string? Digest { get; set; }
     }
 
+    [JsonSerializable(typeof(Release))]
+    partial class ReleaseJsonContext : JsonSerializerContext;
+
     /// <summary>Returns a downloaded, verified update, or null when already up to date.</summary>
     public static async Task<UpdateInfo?> CheckAndDownloadAsync(CancellationToken ct = default)
     {
@@ -50,7 +53,7 @@ static class Updater
         http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
 
         var json = await http.GetStringAsync($"https://api.github.com/repos/{Repo}/releases/latest", ct);
-        var release = JsonSerializer.Deserialize<Release>(json);
+        var release = JsonSerializer.Deserialize(json, ReleaseJsonContext.Default.Release);
         if (release == null || release.Draft || release.Prerelease) return null;
         if (!Version.TryParse(release.TagName.TrimStart('v', 'V'), out var latest) || Normalize(latest) <= Normalize(CurrentVersion))
             return null;

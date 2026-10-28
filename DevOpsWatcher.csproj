@@ -12,4 +12,12 @@
     <Version>1.0.0</Version>
   </PropertyGroup>
 
+  <!-- Published exe: trim unused framework code and compress the single file (~116 MB -> ~17 MB).
+       WinForms isn't officially trim-supported, hence the suppression; JSON uses source generation to stay trim-safe. -->
+  <PropertyGroup>
+    <PublishTrimmed>true</PublishTrimmed>
+    <_SuppressWinFormsTrimError>true</_SuppressWinFormsTrimError>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+
 </Project>

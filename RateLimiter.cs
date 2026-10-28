@@ -103,7 +103,7 @@ sealed class RateLimiter
             }
 
             if (DateTime.UtcNow + wait > deadline)
-                throw new AzDoException(429, $"Rate limit reached for '{endpoint}'. Try again in {Math.Ceiling(wait.TotalSeconds)}s.");
+                throw new PipelineException(429, $"Rate limit reached for '{endpoint}'. Try again in {Math.Ceiling(wait.TotalSeconds)}s.");
             if (!logged)
             {
                 Log.Write($"Rate limit: waiting {wait.TotalSeconds:0.#}s for '{endpoint}'");

@@ -3,13 +3,13 @@ namespace DevOpsWatcher;
 public sealed record DashboardModel(
     IReadOnlyList<BuildInfo> Builds,
     IReadOnlyList<ApprovalInfo> Approvals,
-    IReadOnlyDictionary<int, string> Stages,
-    IReadOnlyDictionary<int, IReadOnlyList<StageStatus>> StageStatuses,
+    IReadOnlyDictionary<string, string> Stages,
+    IReadOnlyDictionary<string, IReadOnlyList<StageStatus>> StageStatuses,
     DateTime? LastPoll,
     string? Error,
     TrayState State)
 {
-    public static readonly DashboardModel Empty = new([], [], new Dictionary<int, string>(), new Dictionary<int, IReadOnlyList<StageStatus>>(), null, null, TrayState.Unconfigured);
+    public static readonly DashboardModel Empty = new([], [], new Dictionary<string, string>(), new Dictionary<string, IReadOnlyList<StageStatus>>(), null, null, TrayState.Unconfigured);
 }
 
 /// <summary>Compact, owner-drawn flyout listing pending approvals and the latest builds.</summary>
@@ -203,17 +203,17 @@ sealed class DashboardForm : PopupForm
             y += h;
         }
 
-        var awaiting = m.Approvals.Select(a => a.RunId).ToHashSet();
+        var awaiting = m.Approvals.Select(a => a.RunKey).ToHashSet();
         foreach (var b in m.Builds.Take(MaxBuilds))
         {
-            var stageList = b.IsActive && m.StageStatuses.TryGetValue(b.Id, out var sl) ? sl : [];
+            var stageList = b.IsActive && m.StageStatuses.TryGetValue(b.Key, out var sl) ? sl : [];
             int h = Px(stageList.Count > 0 ? 70 : 50);
             var row = new Rectangle(0, y, W, h);
             _hits.Add(new Hit(row, () => { Shell.Open(b.WebUrl); HideFlyout(); }));
             if (g != null)
             {
                 if (hovered(row)) { using var hb = new SolidBrush(Palette.Hover); g.FillRectangle(hb, row); }
-                var (color, glyph) = Palette.ForBuild(b, awaiting.Contains(b.Id));
+                var (color, glyph) = Palette.ForBuild(b, awaiting.Contains(b.Key));
                 int bs = Px(20);
                 Badge.Draw(g, new RectangleF(pad, y + (h - bs) / 2f, bs, bs), color, glyph, _frame);
                 using var sep = new Pen(Palette.Border);
@@ -228,14 +228,14 @@ sealed class DashboardForm : PopupForm
             if (b.IsActive)
             {
                 topRight = b.StartTime is { } s ? $"running {Fmt.Duration(DateTime.Now - s)}" : "queued";
-                bottomRight = m.Stages.TryGetValue(b.Id, out var stage) ? stage : "";
+                bottomRight = m.Stages.TryGetValue(b.Key, out var stage) ? stage : "";
             }
             else
             {
                 topRight = Fmt.Ago(b.FinishTime ?? b.QueueTime);
                 bottomRight = b.StartTime is { } s && b.FinishTime is { } f ? Fmt.Duration(f - s) : Palette.ResultText(b.Result);
             }
-            var activeColor = awaiting.Contains(b.Id) ? Palette.Orange : Palette.Blue;
+            var activeColor = awaiting.Contains(b.Key) ? Palette.Orange : Palette.Blue;
             Text(topRight, Font, new Rectangle(W - pad - rightW, y + Px(7), rightW, Px(20)), b.IsActive ? activeColor : Palette.Muted, TextFormatFlags.Right);
             Text(bottomRight, _smallFont, new Rectangle(W - pad - rightW, y + Px(26), rightW, Px(18)), Palette.Muted, TextFormatFlags.Right);
             if (g != null && stageList.Count > 0)

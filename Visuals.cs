@@ -53,6 +53,19 @@ static class Palette
         _ => (Gray, Glyph.Dash),
     };
 
+    public static (Color Color, Glyph Glyph) ForStage(StageStatus s) => s.State switch
+    {
+        "inProgress" => s.Waiting ? (Orange, Glyph.Bang) : (Blue, Glyph.Spinner),
+        "completed" => s.Result switch
+        {
+            "succeeded" => (Green, Glyph.Check),
+            "succeededWithIssues" => (Amber, Glyph.Bang),
+            "failed" or "abandoned" => (Red, Glyph.Cross),
+            _ => (Gray, Glyph.Dash),   // skipped, canceled
+        },
+        _ => (Gray, Glyph.Ring),       // pending
+    };
+
     public static string ResultText(string? result) => result switch
     {
         "succeeded" => "Succeeded",

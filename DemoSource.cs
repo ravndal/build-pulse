@@ -67,7 +67,7 @@ sealed class DemoSource : IPipelineSource
         double t = T;
         var records = new List<TimelineRecord>();
         void Stage(string id, string name, int order, string state) =>
-            records.Add(new TimelineRecord { Id = id, Type = "Stage", Name = name, Order = order, State = state });
+            records.Add(new TimelineRecord { Id = id, Type = "Stage", Name = name, Order = order, State = state, Result = state == "completed" ? "succeeded" : null });
 
         switch (buildId)
         {

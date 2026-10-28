@@ -43,6 +43,12 @@ public sealed class TimelineRecord
     public string? TaskName { get; init; }
 }
 
+/// <summary>One stage of a run (or job, for pipelines without named stages) as shown in the dashboard.</summary>
+public sealed record StageStatus(string Name, string State, string? Result, bool Waiting)
+{
+    public bool IsCurrent => State == "inProgress";
+}
+
 public enum ApprovalKind { Approval, ManualValidation }
 
 public sealed class ApprovalInfo

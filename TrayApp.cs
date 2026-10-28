@@ -28,6 +28,7 @@ sealed class TrayApp : ApplicationContext
     List<BuildInfo> _builds = [];
     List<ApprovalInfo> _approvals = [];
     Dictionary<int, string> _stages = [];
+    Dictionary<int, IReadOnlyList<StageStatus>> _stageStatuses = [];
     string? _error;
     bool _pollFailed, _baselined, _polling, _failureDot;
     DateTime? _lastPoll;
@@ -92,6 +93,7 @@ sealed class TrayApp : ApplicationContext
         _builds = [];
         _approvals = [];
         _stages = [];
+        _stageStatuses = [];
         _error = null;
         _pollFailed = false;
         _lastPoll = null;
@@ -143,6 +145,7 @@ sealed class TrayApp : ApplicationContext
 
             // Timelines of running builds give the current stage and the stage an approval is waiting in.
             var stages = new Dictionary<int, string>();
+            var stageStatuses = new Dictionary<int, IReadOnlyList<StageStatus>>();
             foreach (var build in builds.Where(b => b.IsActive))
             {
                 List<TimelineRecord> timeline;
@@ -154,6 +157,7 @@ sealed class TrayApp : ApplicationContext
                 }
 
                 if (CurrentStage(timeline) is { } stage) stages[build.Id] = stage;
+                if (StageStatuses(timeline) is { Count: > 0 } statuses) stageStatuses[build.Id] = statuses;
                 foreach (var approval in approvals.Where(a => a.RunId == build.Id))
                 {
                     approval.StageName ??= StageOf(timeline, timeline.FirstOrDefault(r => r.Id == approval.Id));
@@ -217,6 +221,7 @@ sealed class TrayApp : ApplicationContext
 
             _builds = builds;
             _stages = stages;
+            _stageStatuses = stageStatuses;
             _approvals = approvals;
             _error = warnings.FirstOrDefault();
             _pollFailed = false;
@@ -402,7 +407,7 @@ sealed class TrayApp : ApplicationContext
     }
 
     DashboardModel CreateModel() =>
-        new(_builds.Take(DashboardForm.MaxBuilds).ToList(), _approvals, _stages, _lastPoll, _error, _state);
+        new(_builds.Take(DashboardForm.MaxBuilds).ToList(), _approvals, _stages, _stageStatuses, _lastPoll, _error, _state);
 
     void ToggleDashboard()
     {
@@ -446,6 +451,23 @@ sealed class TrayApp : ApplicationContext
         if (stage != null) return stage.Name;
 
         return timeline.Where(r => r.Type == "Job" && r.State == "inProgress").OrderBy(r => r.Order).FirstOrDefault()?.Name;
+    }
+
+    static List<StageStatus> StageStatuses(List<TimelineRecord> timeline)
+    {
+        var byId = timeline.GroupBy(r => r.Id).ToDictionary(g => g.Key, g => g.First());
+        // Every ancestor of a waiting approval or validation is shown as waiting.
+        var waiting = new HashSet<string>();
+        foreach (var record in timeline.Where(r => (r.Type == "Checkpoint.Approval" && r.State == "inProgress") || IsWaitingManualValidation(r)))
+            for (var r = record; r != null && waiting.Add(r.Id);)
+                r = r.ParentId != null && byId.TryGetValue(r.ParentId, out var parent) ? parent : null;
+
+        var stages = timeline.Where(r => r.Type == "Stage" && r.Name != "__default").ToList();
+        // Pipelines without named stages only have the implicit one; show their jobs instead.
+        if (stages.Count == 0) stages = timeline.Where(r => r.Type == "Job").ToList();
+        return stages.OrderBy(r => r.Order)
+            .Select(r => new StageStatus(r.Name, r.State, r.Result, waiting.Contains(r.Id)))
+            .ToList();
     }
 
     static bool IsWaitingManualValidation(TimelineRecord r) =>

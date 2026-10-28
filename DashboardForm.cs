@@ -4,11 +4,12 @@ public sealed record DashboardModel(
     IReadOnlyList<BuildInfo> Builds,
     IReadOnlyList<ApprovalInfo> Approvals,
     IReadOnlyDictionary<int, string> Stages,
+    IReadOnlyDictionary<int, IReadOnlyList<StageStatus>> StageStatuses,
     DateTime? LastPoll,
     string? Error,
     TrayState State)
 {
-    public static readonly DashboardModel Empty = new([], [], new Dictionary<int, string>(), null, null, TrayState.Unconfigured);
+    public static readonly DashboardModel Empty = new([], [], new Dictionary<int, string>(), new Dictionary<int, IReadOnlyList<StageStatus>>(), null, null, TrayState.Unconfigured);
 }
 
 /// <summary>Compact, owner-drawn flyout listing pending approvals and the latest builds.</summary>
@@ -205,7 +206,8 @@ sealed class DashboardForm : PopupForm
         var awaiting = m.Approvals.Select(a => a.RunId).ToHashSet();
         foreach (var b in m.Builds.Take(MaxBuilds))
         {
-            int h = Px(50);
+            var stageList = b.IsActive && m.StageStatuses.TryGetValue(b.Id, out var sl) ? sl : [];
+            int h = Px(stageList.Count > 0 ? 70 : 50);
             var row = new Rectangle(0, y, W, h);
             _hits.Add(new Hit(row, () => { Shell.Open(b.WebUrl); HideFlyout(); }));
             if (g != null)
@@ -236,6 +238,8 @@ sealed class DashboardForm : PopupForm
             var activeColor = awaiting.Contains(b.Id) ? Palette.Orange : Palette.Blue;
             Text(topRight, Font, new Rectangle(W - pad - rightW, y + Px(7), rightW, Px(20)), b.IsActive ? activeColor : Palette.Muted, TextFormatFlags.Right);
             Text(bottomRight, _smallFont, new Rectangle(W - pad - rightW, y + Px(26), rightW, Px(18)), Palette.Muted, TextFormatFlags.Right);
+            if (g != null && stageList.Count > 0)
+                DrawStages(g, stageList, new Rectangle(tx, y + Px(46), W - tx - pad, Px(16)));
             y += h;
         }
 
@@ -268,6 +272,40 @@ sealed class DashboardForm : PopupForm
             g.DrawRectangle(border, 0, 0, W - 1, y - 1);
         }
         return y;
+    }
+
+    /// <summary>Draws a run's stages left to right as small status badges, dropping names that don't fit.</summary>
+    void DrawStages(Graphics g, IReadOnlyList<StageStatus> stages, Rectangle area)
+    {
+        int dot = Px(12), gap = Px(4), link = Px(14);
+        var nameW = stages.Select(s => TextRenderer.MeasureText(g, s.Name, _smallFont, Size.Empty, TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding).Width).ToArray();
+        int TotalWidth(Func<int, bool> named) =>
+            Enumerable.Range(0, stages.Count).Sum(i => dot + (named(i) ? gap + nameW[i] : 0)) + link * (stages.Count - 1);
+        Func<int, bool> named = _ => true;
+        if (TotalWidth(named) > area.Width) named = i => stages[i].IsCurrent;
+
+        float cy = area.Y + area.Height / 2f;
+        using var linkPen = new Pen(Palette.Border, Math.Max(1f, Px(1)));
+        int x = area.X;
+        for (int i = 0; i < stages.Count && x + dot <= area.Right; i++)
+        {
+            var s = stages[i];
+            if (i > 0)
+            {
+                g.DrawLine(linkPen, x + Px(3), cy, x + link - Px(3), cy);
+                x += link;
+                if (x + dot > area.Right) break;
+            }
+            var (color, glyph) = Palette.ForStage(s);
+            if (s.Waiting && _frame / 5 % 2 == 1) color = Palette.Red;
+            Badge.Draw(g, new RectangleF(x, cy - dot / 2f, dot, dot), color, glyph, _frame);
+            x += dot;
+            if (!named(i)) continue;
+            x += gap;
+            var r = new Rectangle(x, area.Y, Math.Min(nameW[i] + Px(2), area.Right - x), area.Height);
+            TextRenderer.DrawText(g, s.Name, _smallFont, r, s.State == "pending" ? Palette.Muted : Palette.Text, Line | TextFormatFlags.NoPadding);
+            x += nameW[i];
+        }
     }
 
     static string Summary(DashboardModel m)

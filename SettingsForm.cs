@@ -41,7 +41,7 @@ sealed class SettingsForm : Form
         _tracked = current.Pipelines.ToDictionary(p => p.Key);
 
         Text = "DevOps Watcher – Settings";
-        Icon = IconFactory.Get(TrayState.Idle, 0, false);
+        Icon = IconFactory.App;
         AutoScaleMode = AutoScaleMode.Dpi;
         AutoScaleDimensions = new SizeF(96f, 96f);
         Font = new Font("Segoe UI", 9f);

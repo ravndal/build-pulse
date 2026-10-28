@@ -1,0 +1,475 @@
+using System.Media;
+
+namespace DevOpsWatcher;
+
+/// <summary>Owns the tray icon, polls Azure DevOps, diffs state and raises popups.</summary>
+sealed class TrayApp : ApplicationContext
+{
+    sealed record BuildSnapshot(string Status, string? Result, string? Stage);
+
+    readonly bool _demo;
+    readonly NotifyIcon _tray;
+    readonly DashboardForm _dashboard;
+    readonly ToolStripMenuItem _muteItem, _startupItem;
+    readonly System.Windows.Forms.Timer _pollTimer = new();
+    readonly System.Windows.Forms.Timer _animTimer = new() { Interval = 120 };
+    readonly DateTime _startedAt = DateTime.Now;
+
+    readonly Dictionary<int, BuildSnapshot> _known = [];
+    readonly Dictionary<string, ApprovalForm> _approvalForms = [];
+    /// <summary>Approvals the user snoozed: no popup until the time passes.</summary>
+    readonly Dictionary<string, DateTime> _snoozedUntil = [];
+    /// <summary>Approvals the user just decided: hidden entirely while the server catches up.</summary>
+    readonly Dictionary<string, DateTime> _decidedUntil = [];
+
+    AppSettings _settings;
+    IPipelineSource? _source;
+    SettingsForm? _settingsForm;
+    List<BuildInfo> _builds = [];
+    List<ApprovalInfo> _approvals = [];
+    Dictionary<int, string> _stages = [];
+    string? _error;
+    bool _pollFailed, _baselined, _polling, _failureDot;
+    DateTime? _lastPoll;
+    TrayState _state = TrayState.Unconfigured;
+    int _frame;
+
+    public TrayApp(bool demo, bool openSettings = false)
+    {
+        _demo = demo;
+        _settings = demo ? DemoSource.CreateSettings() : AppSettings.Load();
+
+        _dashboard = new DashboardForm();
+        _dashboard.RefreshRequested += () => _ = PollAsync();
+        _dashboard.SettingsRequested += ShowSettings;
+        _dashboard.ApprovalClicked += ShowApproval;
+
+        _muteItem = new ToolStripMenuItem("Mute status popups") { CheckOnClick = true };
+        _muteItem.CheckedChanged += (_, _) =>
+        {
+            _settings.ShowStatusPopups = !_muteItem.Checked;
+            if (!_demo) _settings.Save();
+        };
+        _startupItem = new ToolStripMenuItem("Start with Windows") { CheckOnClick = true, Checked = Startup.IsEnabled };
+        _startupItem.CheckedChanged += (_, _) => Startup.Set(_startupItem.Checked);
+
+        var menu = new ContextMenuStrip();
+        menu.Items.Add("Open dashboard", null, (_, _) => ToggleDashboard());
+        menu.Items.Add("Refresh now", null, (_, _) => _ = PollAsync());
+        menu.Items.Add("Settings…", null, (_, _) => ShowSettings());
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(_muteItem);
+        menu.Items.Add(_startupItem);
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Exit", null, (_, _) => ExitThread());
+
+        _tray = new NotifyIcon
+        {
+            ContextMenuStrip = menu,
+            Icon = IconFactory.Get(TrayState.Unconfigured, 0, false),
+            Text = "DevOps Watcher",
+            Visible = true,
+        };
+        _tray.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) ToggleDashboard(); };
+
+        _pollTimer.Tick += async (_, _) => await PollAsync();
+        _animTimer.Tick += (_, _) => { _frame++; RenderIcon(); };
+
+        ApplySettings(_settings);
+        if (openSettings) ShowSettings();
+    }
+
+    void ApplySettings(AppSettings settings)
+    {
+        _settings = settings;
+        _muteItem.Checked = !settings.ShowStatusPopups;
+
+        _source?.Dispose();
+        _source = null;
+        foreach (var form in _approvalForms.Values.ToList()) form.Close();
+        _known.Clear();
+        _baselined = false;
+        _builds = [];
+        _approvals = [];
+        _stages = [];
+        _error = null;
+        _pollFailed = false;
+        _lastPoll = null;
+
+        if (_demo && settings.ServerUrl == DemoSource.Url)
+            _source = new DemoSource();
+        else if (settings.ServerUrl != "" && settings.HasCredentials)
+            _source = new AzDoClient(settings.ServerUrl, settings.UseWindowsAuth, settings.Pat, settings.RateLimits);
+
+        _pollTimer.Interval = Math.Max(10, settings.PollSeconds) * 1000;
+        _pollTimer.Start();
+        UpdateState();
+
+        if (!settings.IsConfigured) ShowSettings();
+        else _ = PollAsync();
+    }
+
+    async Task PollAsync()
+    {
+        if (_polling || _source == null || _settings.Pipelines.Count == 0) return;
+        _polling = true;
+        var source = _source;
+        try
+        {
+            var builds = new List<BuildInfo>();
+            var approvals = new List<ApprovalInfo>();
+            var warnings = new List<string>();
+            bool approvalsApiFailed = false;
+
+            foreach (var group in _settings.Pipelines.GroupBy(p => p.Project, StringComparer.OrdinalIgnoreCase))
+            {
+                var ids = group.Select(p => p.DefinitionId).Distinct().ToList();
+                builds.AddRange(await source.GetBuildsAsync(group.Key, ids, Math.Clamp(ids.Count * 8, 25, 200)));
+                try
+                {
+                    var pending = await source.GetPendingApprovalsAsync(group.Key);
+                    approvals.AddRange(pending.Where(a => ids.Contains(a.DefinitionId)));
+                }
+                catch (AzDoException ex)
+                {
+                    approvalsApiFailed = true;
+                    warnings.Add($"Approvals unavailable: {ex.Message}");
+                    Log.Write($"Approvals query failed for '{group.Key}': {ex.StatusCode} {ex.Message}");
+                }
+            }
+
+            builds = builds.GroupBy(b => b.Id).Select(g => g.First())
+                .OrderByDescending(b => b.QueueTime ?? DateTime.MinValue).ToList();
+
+            // Timelines of running builds give the current stage and the stage an approval is waiting in.
+            var stages = new Dictionary<int, string>();
+            foreach (var build in builds.Where(b => b.IsActive))
+            {
+                List<TimelineRecord> timeline;
+                try { timeline = await source.GetTimelineAsync(build.Project, build.Id); }
+                catch (AzDoException ex)
+                {
+                    Log.Write($"Timeline failed for build {build.Id}: {ex.StatusCode} {ex.Message}");
+                    continue;
+                }
+
+                if (CurrentStage(timeline) is { } stage) stages[build.Id] = stage;
+                foreach (var approval in approvals.Where(a => a.RunId == build.Id))
+                {
+                    approval.StageName ??= StageOf(timeline, timeline.FirstOrDefault(r => r.Id == approval.Id));
+                    if (approval.RunName == "") approval.RunName = build.Number;
+                    if (approval.PipelineName == "") approval.PipelineName = build.DefinitionName;
+                }
+
+                if (approvalsApiFailed)
+                {
+                    // Fall back to the timeline so the tray still flags runs waiting for approval.
+                    foreach (var checkpoint in timeline.Where(r => r.Type == "Checkpoint.Approval" && r.State == "inProgress"))
+                        approvals.Add(new ApprovalInfo
+                        {
+                            Id = checkpoint.Id,
+                            Project = build.Project,
+                            DefinitionId = build.DefinitionId,
+                            PipelineName = build.DefinitionName,
+                            RunId = build.Id,
+                            RunName = build.Number,
+                            StageName = StageOf(timeline, checkpoint),
+                            CreatedOn = checkpoint.StartTime,
+                            WebUrl = build.WebUrl,
+                            CanApprove = false,
+                            BrowserHint = "Approve this run in the browser (your token can't read approvals).",
+                        });
+                }
+
+                // ManualValidation steps in agentless jobs pause the run like an approval but aren't in the approvals API.
+                foreach (var task in timeline.Where(IsWaitingManualValidation))
+                    approvals.Add(new ApprovalInfo
+                    {
+                        Kind = ApprovalKind.ManualValidation,
+                        ProjectId = build.ProjectId,
+                        PlanId = build.PlanId,
+                        JobId = task.ParentId ?? "",
+                        Id = task.Id,
+                        Project = build.Project,
+                        DefinitionId = build.DefinitionId,
+                        PipelineName = build.DefinitionName,
+                        RunId = build.Id,
+                        RunName = build.Number,
+                        StageName = StageOf(timeline, task) is { } s ? $"{s} · {task.Name}" : task.Name,
+                        CreatedOn = task.StartTime,
+                        WebUrl = build.WebUrl,
+                        CanApprove = _settings.EnableManualValidationActions && build.PlanId != "" && task.ParentId != null,
+                        BrowserHint = "This is a Manual validation step. Open the run and choose Review to resume or reject it.",
+                    });
+            }
+
+            foreach (var approval in approvals.Where(a => a.WebUrl == ""))
+                approval.WebUrl = builds.FirstOrDefault(b => b.Id == approval.RunId)?.WebUrl ?? "";
+
+            var now = DateTime.Now;
+            foreach (var expired in _decidedUntil.Where(kv => kv.Value < now).Select(kv => kv.Key).ToList())
+                _decidedUntil.Remove(expired);
+            approvals = approvals.Where(a => !_decidedUntil.ContainsKey(a.Id)).ToList();
+
+            if (source != _source) return; // settings changed mid-poll
+            DiffBuilds(builds, stages);
+            SyncApprovals(approvals);
+
+            _builds = builds;
+            _stages = stages;
+            _approvals = approvals;
+            _error = warnings.FirstOrDefault();
+            _pollFailed = false;
+            _lastPoll = DateTime.Now;
+            Log.Write($"Poll ok: {builds.Count} builds ({builds.Count(b => b.IsActive)} active), {approvals.Count} approvals"
+                + string.Concat(builds.Where(b => b.IsActive).Select(b => $" | {b.DefinitionName} #{b.Number} {b.Status} stage='{stages.GetValueOrDefault(b.Id)}'"))
+                + string.Concat(approvals.Select(a => $" | approval {a.PipelineName} run={a.RunId} stage='{a.StageName}' canApprove={a.CanApprove}")));
+        }
+        catch (Exception ex)
+        {
+            if (source != _source) return;
+            Log.Write($"Poll failed: {ex.GetType().Name}: {ex.Message}");
+            _error = ex.Message;
+            _pollFailed = true;
+        }
+        finally
+        {
+            _polling = false;
+            UpdateState();
+        }
+    }
+
+    void DiffBuilds(List<BuildInfo> builds, Dictionary<int, string> stages)
+    {
+        foreach (var b in builds)
+        {
+            stages.TryGetValue(b.Id, out var stage);
+            if (_baselined)
+            {
+                if (!_known.TryGetValue(b.Id, out var old))
+                {
+                    if (b.IsActive)
+                        Toast(Palette.Blue, $"{b.DefinitionName} {(b.Status == "inProgress" ? "started" : "queued")}", Fmt.BuildLine(b), b.WebUrl);
+                    else if (b.FinishTime > _startedAt)
+                        ToastResult(b);
+                }
+                else if (old.Status != "completed" && b.Status == "completed")
+                {
+                    ToastResult(b);
+                }
+                else if (old.Status == "notStarted" && b.Status == "inProgress")
+                {
+                    Toast(Palette.Blue, $"{b.DefinitionName} started", Fmt.BuildLine(b), b.WebUrl);
+                }
+                else if (b.IsActive && stage != null && old.Stage != null && stage != old.Stage
+                         && !stage.StartsWith(WaitingForApproval, StringComparison.Ordinal))
+                {
+                    Toast(Palette.Blue, $"{b.DefinitionName} → {stage}", Fmt.BuildLine(b), b.WebUrl);
+                }
+            }
+            _known[b.Id] = new BuildSnapshot(b.Status, b.Result, stage);
+        }
+
+        var current = builds.Select(b => b.Id).ToHashSet();
+        foreach (var gone in _known.Keys.Where(id => !current.Contains(id)).ToList()) _known.Remove(gone);
+        _baselined = true;
+    }
+
+    void ToastResult(BuildInfo b)
+    {
+        var (color, _) = Palette.ForResult(b.Result);
+        Toast(color, $"{b.DefinitionName}: {Palette.ResultText(b.Result)}", Fmt.BuildLine(b), b.WebUrl);
+    }
+
+    void SyncApprovals(List<ApprovalInfo> approvals)
+    {
+        var pendingIds = approvals.Select(a => a.Id).ToHashSet();
+        foreach (var (id, form) in _approvalForms.Where(kv => !pendingIds.Contains(kv.Key)).ToList())
+        {
+            form.Close();
+            if (!_decidedUntil.ContainsKey(id))
+                Toast(Palette.Gray, "Approval no longer pending", $"{form.Approval.PipelineName} · {form.Approval.RunName}", form.Approval.WebUrl);
+        }
+
+        var now = DateTime.Now;
+        foreach (var a in approvals)
+        {
+            if (_approvalForms.TryGetValue(a.Id, out var form)) { form.UpdateApproval(a); continue; }
+            if (_snoozedUntil.TryGetValue(a.Id, out var until) && until > now) continue;
+            OpenApprovalForm(a, playSound: true);
+        }
+    }
+
+    void ShowApproval(ApprovalInfo approval)
+    {
+        _dashboard.HideFlyout();
+        _snoozedUntil.Remove(approval.Id);
+        if (_approvalForms.TryGetValue(approval.Id, out var existing)) existing.Activate();
+        else OpenApprovalForm(approval, playSound: false);
+    }
+
+    void OpenApprovalForm(ApprovalInfo approval, bool playSound)
+    {
+        var form = new ApprovalForm(approval) { Decide = DecideAsync };
+        form.Snoozed += a => _snoozedUntil[a.Id] = DateTime.Now.AddMinutes(15);
+        form.FormClosed += (_, _) =>
+        {
+            if (_approvalForms.TryGetValue(approval.Id, out var current) && current == form)
+                _approvalForms.Remove(approval.Id);
+        };
+        _approvalForms[approval.Id] = form;
+        PopupHost.Show(form, sticky: true);
+        if (playSound) SystemSounds.Exclamation.Play();
+    }
+
+    async Task DecideAsync(ApprovalInfo approval, bool approve, string comment)
+    {
+        if (_source == null) throw new InvalidOperationException("Not connected.");
+        try
+        {
+            if (approval.Kind == ApprovalKind.ManualValidation)
+                await _source.CompleteManualValidationAsync(approval, resume: approve);
+            else
+                await _source.UpdateApprovalAsync(approval.Project, approval.Id, approve, comment);
+            Log.Write($"{approval.Kind} {approval.Id} {(approve ? "approved" : "rejected")}");
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"Approval {approval.Id} update failed: {ex.Message}");
+            throw;
+        }
+
+        _decidedUntil[approval.Id] = DateTime.Now.AddMinutes(2);
+        _approvals.RemoveAll(a => a.Id == approval.Id);
+        UpdateState();
+        var verb = approval.Kind == ApprovalKind.ManualValidation ? (approve ? "Resumed" : "Rejected") : (approve ? "Approved" : "Rejected");
+        Toast(approve ? Palette.Green : Palette.Red, verb,
+            $"{approval.PipelineName} · {approval.RunName}{(approval.StageName is { } s ? $" · {s}" : "")}", approval.WebUrl, force: true);
+        _ = PollAsync();
+    }
+
+    void Toast(Color accent, string title, string body, string? url, bool force = false)
+    {
+        if (!force && !_settings.ShowStatusPopups) return;
+        PopupHost.Show(new ToastForm(accent, title, body, url), sticky: false);
+    }
+
+    void UpdateState()
+    {
+        if (_source == null || _settings.Pipelines.Count == 0) _state = TrayState.Unconfigured;
+        else if (_approvals.Count > 0) _state = TrayState.Approval;
+        else if (_pollFailed) _state = TrayState.Error;
+        else if (_builds.Any(b => b.IsActive)) _state = TrayState.Running;
+        else _state = TrayState.Idle;
+
+        // Red dot when the most recent finished run of any tracked pipeline failed.
+        _failureDot = _builds.Where(b => b.Status == "completed")
+            .GroupBy(b => b.DefinitionId)
+            .Any(g => g.OrderByDescending(b => b.FinishTime).First().Result == "failed");
+
+        bool animate = _state is TrayState.Running or TrayState.Approval;
+        if (animate && !_animTimer.Enabled) _animTimer.Start();
+        if (!animate) _animTimer.Stop();
+
+        RenderIcon();
+        _tray.Text = Tooltip();
+        _dashboard.SetModel(CreateModel());
+    }
+
+    void RenderIcon()
+    {
+        int frame = _state switch
+        {
+            TrayState.Running => _frame % 12,
+            TrayState.Approval => _frame / 4 % 2,
+            _ => 0,
+        };
+        _tray.Icon = IconFactory.Get(_state, frame, _failureDot);
+    }
+
+    string Tooltip()
+    {
+        var text = _state switch
+        {
+            TrayState.Unconfigured => "Not configured",
+            TrayState.Error => "Connection problem: " + _error,
+            TrayState.Approval => $"{_approvals.Count} waiting for approval",
+            TrayState.Running => $"{_builds.Count(b => b.IsActive)} running",
+            _ => _failureDot ? "Idle · last run failed" : "All quiet",
+        };
+        text = "DevOps Watcher – " + text;
+        return text.Length > 127 ? text[..124] + "…" : text;
+    }
+
+    DashboardModel CreateModel() =>
+        new(_builds.Take(DashboardForm.MaxBuilds).ToList(), _approvals, _stages, _lastPoll, _error, _state);
+
+    void ToggleDashboard()
+    {
+        if (_dashboard.Visible) { _dashboard.HideFlyout(); return; }
+        if (_dashboard.RecentlyHidden) return;
+        _dashboard.SetModel(CreateModel());
+        _dashboard.ShowNearTray();
+    }
+
+    void ShowSettings()
+    {
+        if (_settingsForm is { IsDisposed: false })
+        {
+            _settingsForm.Activate();
+            return;
+        }
+        _settingsForm = new SettingsForm(_settings);
+        _settingsForm.FormClosed += (_, _) =>
+        {
+            var result = _settingsForm?.Result;
+            Log.Write(result != null ? "Settings window closed, applying new settings" : "Settings window closed without saving");
+            _settingsForm = null;
+            _startupItem.Checked = Startup.IsEnabled;
+            if (result != null) ApplySettings(result);
+        };
+        _settingsForm.Show();
+        _settingsForm.Activate();
+    }
+
+    const string WaitingForApproval = "Waiting for approval";
+
+    static string? CurrentStage(List<TimelineRecord> timeline)
+    {
+        var waiting = timeline.FirstOrDefault(r => r.Type == "Checkpoint.Approval" && r.State == "inProgress")
+            ?? timeline.FirstOrDefault(IsWaitingManualValidation);
+        if (waiting != null)
+            return StageOf(timeline, waiting) is { } s ? $"{WaitingForApproval} · {s}" : WaitingForApproval;
+
+        var stage = timeline.Where(r => r.Type == "Stage" && r.State == "inProgress" && r.Name != "__default")
+            .OrderBy(r => r.Order).LastOrDefault();
+        if (stage != null) return stage.Name;
+
+        return timeline.Where(r => r.Type == "Job" && r.State == "inProgress").OrderBy(r => r.Order).FirstOrDefault()?.Name;
+    }
+
+    static bool IsWaitingManualValidation(TimelineRecord r) =>
+        r.Type == "Task" && r.State == "inProgress"
+        && (r.TaskName ?? r.Name).Equals("ManualValidation", StringComparison.OrdinalIgnoreCase);
+
+    static string? StageOf(List<TimelineRecord> timeline, TimelineRecord? record)
+    {
+        var byId = timeline.GroupBy(r => r.Id).ToDictionary(g => g.Key, g => g.First());
+        for (int depth = 0; record != null && depth < 10; depth++)
+        {
+            if (record.Type == "Stage") return record.Name == "__default" ? null : record.Name;
+            record = record.ParentId != null && byId.TryGetValue(record.ParentId, out var parent) ? parent : null;
+        }
+        return null;
+    }
+
+    protected override void ExitThreadCore()
+    {
+        _pollTimer.Stop();
+        _animTimer.Stop();
+        _tray.Visible = false;
+        _tray.Dispose();
+        _source?.Dispose();
+        base.ExitThreadCore();
+    }
+}

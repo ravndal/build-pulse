@@ -1,0 +1,56 @@
+# Throwaway pipeline for testing DevOps Watcher's experimental Resume/Reject of Manual validation steps.
+# It deploys nothing. Create it in a sandbox project (Pipelines > New pipeline > Existing YAML file),
+# then add it to the watcher and run it manually.
+trigger: none
+pr: none
+
+stages:
+  - stage: Build
+    jobs:
+      - job: Build
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - script: echo "Pretend build"
+
+  # Test 1: you are an approver. Resume from the popup should continue the run; Reject should fail it.
+  - stage: SignOffAsApprover
+    dependsOn: Build
+    jobs:
+      - job: SignOff
+        pool: server
+        timeoutInMinutes: 30
+        steps:
+          - task: ManualValidation@1
+            displayName: Sign-off (you are an approver)
+            inputs:
+              notifyUsers: ''
+              approvers: 'REPLACE_WITH_YOUR_EMAIL'
+              instructions: 'DevOps Watcher test 1: Resume this from the popup.'
+              onTimeout: reject
+
+  # Test 2: someone else is the only approver. Resume from the popup MUST fail;
+  # if it succeeds, the shortcut bypasses the approver list and must not be used.
+  - stage: SignOffAsNonApprover
+    dependsOn: SignOffAsApprover
+    jobs:
+      - job: SignOff
+        pool: server
+        timeoutInMinutes: 30
+        steps:
+          - task: ManualValidation@1
+            displayName: Sign-off (you are NOT an approver)
+            inputs:
+              notifyUsers: ''
+              approvers: 'REPLACE_WITH_A_COLLEAGUES_EMAIL'
+              instructions: 'DevOps Watcher test 2: Resume from the popup should be refused.'
+              onTimeout: reject
+
+  - stage: Done
+    dependsOn: SignOffAsNonApprover
+    jobs:
+      - job: Done
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - script: echo "Both sign-offs passed"

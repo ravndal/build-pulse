@@ -1,5 +1,7 @@
 # DevOps Watcher
 
+<img src="assets/app.png" width="96" alt="DevOps Watcher icon">
+
 A small Windows tray app that watches selected Azure DevOps pipelines and GitHub Actions workflows, on one or more servers.
 
 | Tray icon | Meaning |

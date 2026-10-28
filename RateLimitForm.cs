@@ -25,7 +25,7 @@ sealed class RateLimitForm : Form
     public RateLimitForm(RateLimitSettings current)
     {
         Text = "Rate limits";
-        Icon = IconFactory.Get(TrayState.Idle, 0, false);
+        Icon = IconFactory.App;
         AutoScaleMode = AutoScaleMode.Dpi;
         AutoScaleDimensions = new SizeF(96f, 96f);
         Font = new Font("Segoe UI", 9f);

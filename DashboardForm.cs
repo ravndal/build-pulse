@@ -8,14 +8,17 @@ public sealed record DashboardModel(
     IReadOnlyDictionary<string, IReadOnlyList<StageStatus>> StageStatuses,
     DateTime? LastPoll,
     string? Error,
-    TrayState State)
+    TrayState State,
+    UpdateStatus Update,
+    IReadOnlyCollection<string> CollapsedPanels)
 {
-    public static readonly DashboardModel Empty = new([], [], [], new Dictionary<string, string>(), new Dictionary<string, IReadOnlyList<StageStatus>>(), null, null, TrayState.Unconfigured);
+    public static readonly DashboardModel Empty = new([], [], [], new Dictionary<string, string>(), new Dictionary<string, IReadOnlyList<StageStatus>>(),
+        null, null, TrayState.Unconfigured, new UpdateStatus(UpdateStage.Unsupported), []);
 }
 
 /// <summary>
 /// Compact, owner-drawn flyout. Overview: pending approvals, then one panel per repo/project with the latest run of
-/// each tracked pipeline. History: every polled run, newest first, paged, optionally for one repo/project.
+/// each tracked pipeline (collapsible to one status icon per pipeline). History: every polled run, newest first, paged, optionally for one repo/project.
 /// </summary>
 sealed class DashboardForm : PopupForm
 {
@@ -24,10 +27,14 @@ sealed class DashboardForm : PopupForm
     public event Action? RefreshRequested;
     public event Action? SettingsRequested;
     public event Action<ApprovalInfo>? ApprovalClicked;
+    public event Action? UpdateClicked;
+    /// <summary>Raised with every collapsed panel key after the user collapses or expands one.</summary>
+    public event Action<IReadOnlyCollection<string>>? CollapsedChanged;
 
     enum Tab { Overview, History }
 
-    sealed record Hit(Rectangle Rect, Action OnClick);
+    /// <param name="Tip">Shown as a tooltip while hovered.</param>
+    sealed record Hit(Rectangle Rect, Action OnClick, string? Tip = null);
 
     /// <summary>A repo/project on one server: the unit of a panel and of the history filter.</summary>
     sealed record Group(ServerConfig Server, string Project, List<TrackedPipeline> Pipelines)
@@ -41,7 +48,10 @@ sealed class DashboardForm : PopupForm
     readonly Font _boldFont = new("Segoe UI Semibold", 9.5f);
     readonly Font _smallFont = new("Segoe UI", 8.25f);
     readonly System.Windows.Forms.Timer _anim = new() { Interval = 90 };
+    readonly ToolTip _tip = new();
     DashboardModel _model = DashboardModel.Empty;
+    /// <summary><see cref="Group.Key"/>s of panels shown as status icons only.</summary>
+    HashSet<string> _collapsed = [];
     int _hover = -1, _frame;
     DateTime _hiddenAt;
 
@@ -69,6 +79,7 @@ sealed class DashboardForm : PopupForm
     public void SetModel(DashboardModel model)
     {
         _model = model;
+        _collapsed = model.CollapsedPanels.ToHashSet();
         if (Visible) Relayout();
     }
 
@@ -132,6 +143,7 @@ sealed class DashboardForm : PopupForm
         if (!Visible) return;
         _hiddenAt = DateTime.Now;
         _anim.Stop();
+        _tip.Hide(this);
         Hide();
     }
 
@@ -161,6 +173,8 @@ sealed class DashboardForm : PopupForm
         if (index == _hover) return;
         _hover = index;
         Cursor = index >= 0 ? Cursors.Hand : Cursors.Default;
+        if (index >= 0 && _hits[index].Tip is { } tip) _tip.Show(tip, this, e.X + Px(12), e.Y + Px(18));
+        else _tip.Hide(this);
         Invalidate();
     }
 
@@ -168,6 +182,7 @@ sealed class DashboardForm : PopupForm
     {
         base.OnMouseLeave(e);
         _hover = -1;
+        _tip.Hide(this);
         Invalidate();
     }
 
@@ -267,7 +282,23 @@ sealed class DashboardForm : PopupForm
             g.FillRectangle(footer, 0, y, W, footerH);
         }
         var updated = m.LastPoll is { } lp ? $"Updated {lp:HH:mm:ss}" : "Not updated yet";
-        Text(updated, _smallFont, new Rectangle(pad, y, Px(160), footerH), Palette.Muted);
+        int updatedW = TextRenderer.MeasureText(updated, _smallFont).Width;
+        Text(updated, _smallFont, new Rectangle(pad, y, updatedW + Px(4), footerH), Palette.Muted);
+
+        // Update button: checks on click, and only installs when clicked again on "Update to vX".
+        var update = m.Update;
+        var updateFont = update.Stage is UpdateStage.Available or UpdateStage.Installing ? _boldFont : _smallFont;
+        var updateRect = new Rectangle(pad + updatedW + Px(14), y, TextRenderer.MeasureText(update.Label, updateFont).Width + Px(8), footerH);
+        if (update.Clickable) AddHit(updateRect, () => UpdateClicked?.Invoke());
+        var updateColor = update.Stage switch
+        {
+            _ when update.Clickable && Hovered(updateRect) => Palette.Text,
+            UpdateStage.Available => Palette.Green,
+            UpdateStage.Failed => Palette.Red,
+            _ when !update.Clickable => Palette.Muted,
+            _ => Palette.Blue,
+        };
+        Text(update.Label, updateFont, updateRect, updateColor);
 
         int linkX = W - pad;
         foreach (var (label, action) in new (string, Action)[] { ("Settings", () => { HideFlyout(); SettingsRequested?.Invoke(); }), ("Refresh", () => RefreshRequested?.Invoke()) })
@@ -369,54 +400,134 @@ sealed class DashboardForm : PopupForm
         foreach (var group in groups)
         {
             var groupBuilds = m.Builds.Where(group.Contains).ToList();
-            int panelTop = y, headerH = Px(34);
-            int rowsH = group.Pipelines.Sum(p => RowHeight(Latest(groupBuilds, p)));
-            var panel = new Rectangle(pad / 2, panelTop, W - pad, headerH + rowsH);
+            bool collapsed = _collapsed.Contains(group.Key);
+            int panelTop = y, headerH = Px(34), panelX = pad / 2, panelW = W - pad;
+
+            // Panel header: chevron, provider mark, repo/project, server (when there are several),
+            // status icons (collapsed), History link. Clicking the header collapses or expands the panel.
+            int chevron = Px(14), logo = Px(16), hx = panelX + Px(8);
+            const string historyLabel = "History ›";
+            int historyW = TextRenderer.MeasureText(historyLabel, _boldFont).Width + Px(8);
+            var historyRect = new Rectangle(panelX + panelW - Px(8) - historyW, y, historyW, headerH);
+            int nameX = hx + chevron + Px(4) + logo + Px(8), nameW = historyRect.X - nameX - Px(8);
+            int projectW = Math.Min(nameW, TextRenderer.MeasureText(group.Project, _boldFont).Width + Px(4));
+
+            // Collapsed: one status icon per pipeline, in the header when they fit, otherwise in rows under it.
+            int icon = Px(16), iconGap = Px(8), iconsW = group.Pipelines.Count * (icon + iconGap) - iconGap;
+            int iconsRight = historyRect.X - Px(10);
+            bool iconsInline = collapsed && iconsW <= iconsRight - (nameX + projectW + Px(10));
+            int perRow = Math.Max(1, (panelW - Px(20) + iconGap) / (icon + iconGap));
+            int iconRows = (group.Pipelines.Count + perRow - 1) / perRow;
+            int bodyH = !collapsed ? group.Pipelines.Sum(p => RowHeight(Latest(groupBuilds, p)))
+                : iconsInline ? 0
+                : iconRows * (icon + Px(10)) + Px(8);
+            var panel = new Rectangle(panelX, panelTop, panelW, headerH + bodyH);
+            var headerRect = new Rectangle(panel.X + 1, y + 1, panel.Width - 2, headerH - 1);
+
+            // History link and icons are hit-tested before the header so they win over its collapse toggle.
+            AddContentHit(historyRect, viewport, () => ShowTab(Tab.History, group.Key));
+            var icons = new List<(Rectangle Rect, BuildInfo? Build)>();
+            if (collapsed)
+            {
+                for (int i = 0; i < group.Pipelines.Count; i++)
+                {
+                    var pipeline = group.Pipelines[i];
+                    var r = iconsInline
+                        ? new Rectangle(iconsRight - iconsW + i * (icon + iconGap), y + (headerH - icon) / 2, icon, icon)
+                        : new Rectangle(panel.X + Px(10) + i % perRow * (icon + iconGap), y + headerH + Px(9) + i / perRow * (icon + Px(10)), icon, icon);
+                    var build = Latest(groupBuilds, pipeline);
+                    icons.Add((r, build));
+                    var hit = Rectangle.Intersect(Rectangle.Inflate(r, Px(4), Px(4)), viewport);
+                    var tip = $"{pipeline.Name}\n{(build == null ? "No runs yet" : IconTip(build, awaiting.Contains(build.Key)))}";
+                    if (!hit.IsEmpty) _hits.Add(new Hit(hit, () => { if (build != null) { Shell.Open(build.WebUrl); HideFlyout(); } }, tip));
+                }
+            }
+            AddContentHit(headerRect, viewport, () => ToggleCollapsed(group.Key));
+
             if (g != null)
             {
                 using var bg = new SolidBrush(Palette.Surface);
                 g.FillRectangle(bg, panel);
+                if (HoveredContent(headerRect, viewport)) { using var hb = new SolidBrush(Palette.Hover); g.FillRectangle(hb, headerRect); }
                 using var border = new Pen(Palette.Border);
                 g.DrawRectangle(border, panel.X, panel.Y, panel.Width - 1, panel.Height - 1);
+                DrawChevron(g, new RectangleF(hx, y + (headerH - chevron) / 2f, chevron, chevron), collapsed);
+                ProviderLogo.Draw(g, new RectangleF(hx + chevron + Px(4), y + (headerH - logo) / 2f, logo, logo), group.Server.Kind);
             }
-
-            // Panel header: provider mark, repo/project, server (when there are several), History link.
-            int logo = Px(16), hx = panel.X + Px(10);
-            if (g != null) ProviderLogo.Draw(g, new RectangleF(hx, y + (headerH - logo) / 2f, logo, logo), group.Server.Kind);
-            hx += logo + Px(8);
-            const string historyLabel = "History ›";
-            int historyW = TextRenderer.MeasureText(historyLabel, _boldFont).Width + Px(8);
-            var historyRect = new Rectangle(panel.Right - Px(8) - historyW, y, historyW, headerH);
-            AddContentHit(historyRect, viewport, () => ShowTab(Tab.History, group.Key));
-            int nameW = historyRect.X - hx - Px(8);
-            int projectW = Math.Min(nameW, TextRenderer.MeasureText(group.Project, _boldFont).Width + Px(4));
-            Draw(g, group.Project, _boldFont, new Rectangle(hx, y, projectW, headerH), Palette.Text);
-            if (manyServers && nameW - projectW > Px(40))
-                Draw(g, group.Server.DisplayName, _smallFont, new Rectangle(hx + projectW + Px(4), y, nameW - projectW - Px(4), headerH), Palette.Muted);
+            Draw(g, group.Project, _boldFont, new Rectangle(nameX, y, projectW, headerH), Palette.Text);
+            int serverX = nameX + projectW + Px(4), serverRight = iconsInline ? iconsRight - iconsW - Px(8) : nameX + nameW;
+            if (manyServers && serverRight - serverX > Px(40))
+                Draw(g, group.Server.DisplayName, _smallFont, new Rectangle(serverX, y, serverRight - serverX, headerH), Palette.Muted);
             Draw(g, historyLabel, _boldFont, historyRect, HoveredContent(historyRect, viewport) ? Palette.Text : Palette.Blue, TextFormatFlags.Right);
+            if (g != null)
+                foreach (var (r, build) in icons)
+                {
+                    var around = Rectangle.Inflate(r, Px(4), Px(4));
+                    if (HoveredContent(around, viewport)) { using var hb = new SolidBrush(Palette.Border); g.FillEllipse(hb, around); }
+                    var (color, glyph) = build == null ? (Palette.Gray, Glyph.Ring) : Palette.ForBuild(build, awaiting.Contains(build.Key));
+                    if (build != null && awaiting.Contains(build.Key) && _frame / 5 % 2 == 1) color = Palette.Red;
+                    Badge.Draw(g, r, color, glyph, _frame);
+                }
             y += headerH;
 
-            foreach (var pipeline in group.Pipelines)
+            if (collapsed)
             {
-                var build = Latest(groupBuilds, pipeline);
-                int h = RowHeight(build);
-                var row = new Rectangle(panel.X + 1, y, panel.Width - 2, h);
-                if (g != null) { using var sep = new Pen(Palette.Border); g.DrawLine(sep, row.X, y, row.Right, y); }
-                if (build == null)
+                if (!iconsInline && g != null) { using var sep = new Pen(Palette.Border); g.DrawLine(sep, panel.X + 1, y, panel.Right - 2, y); }
+            }
+            else
+            {
+                foreach (var pipeline in group.Pipelines)
                 {
-                    int tx0 = panel.X + Px(42);
-                    Draw(g, pipeline.Name, _boldFont, new Rectangle(tx0, y, row.Right - tx0 - Px(110), h), Palette.Muted);
-                    Draw(g, "No runs yet", _smallFont, new Rectangle(row.Right - Px(110), y, Px(100), h), Palette.Muted, TextFormatFlags.Right);
+                    var build = Latest(groupBuilds, pipeline);
+                    int h = RowHeight(build);
+                    var row = new Rectangle(panel.X + 1, y, panel.Width - 2, h);
+                    if (g != null) { using var sep = new Pen(Palette.Border); g.DrawLine(sep, row.X, y, row.Right, y); }
+                    if (build == null)
+                    {
+                        int tx0 = panel.X + Px(42);
+                        Draw(g, pipeline.Name, _boldFont, new Rectangle(tx0, y, row.Right - tx0 - Px(110), h), Palette.Muted);
+                        Draw(g, "No runs yet", _smallFont, new Rectangle(row.Right - Px(110), y, Px(100), h), Palette.Muted, TextFormatFlags.Right);
+                    }
+                    else
+                    {
+                        DrawBuildRow(g, build, row, viewport, awaiting.Contains(build.Key), subtitle: Fmt.BuildLine(build), logo: null);
+                    }
+                    y += h;
                 }
-                else
-                {
-                    DrawBuildRow(g, build, row, viewport, awaiting.Contains(build.Key), subtitle: Fmt.BuildLine(build), logo: null);
-                }
-                y += h;
             }
             y = panel.Bottom + Px(10);
         }
         return y;
+    }
+
+    void ToggleCollapsed(string key)
+    {
+        if (!_collapsed.Remove(key)) _collapsed.Add(key);
+        CollapsedChanged?.Invoke(_collapsed.ToList());
+        Relayout();
+    }
+
+    /// <summary>A small ▸ (collapsed) or ▾ (expanded) triangle.</summary>
+    static void DrawChevron(Graphics g, RectangleF r, bool collapsed)
+    {
+        float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, s = r.Width * 0.24f;
+        PointF[] points = collapsed
+            ? [new(cx - s * 0.6f, cy - s), new(cx + s * 0.9f, cy), new(cx - s * 0.6f, cy + s)]
+            : [new(cx - s, cy - s * 0.6f), new(cx + s, cy - s * 0.6f), new(cx, cy + s * 0.9f)];
+        var state = g.Save();
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using var brush = new SolidBrush(Palette.Muted);
+        g.FillPolygon(brush, points);
+        g.Restore(state);
+    }
+
+    /// <summary>Second tooltip line for a collapsed panel's status icon.</summary>
+    string IconTip(BuildInfo b, bool awaitingApproval)
+    {
+        if (awaitingApproval) return $"#{b.Number} · waiting for approval";
+        if (b.IsActive)
+            return _model.Stages.TryGetValue(b.Key, out var stage) ? $"#{b.Number} · {stage}" : $"#{b.Number} · {(b.StartTime != null ? "running" : "queued")}";
+        return $"#{b.Number} · {Palette.ResultText(b.Result)} · {Fmt.Ago(b.FinishTime ?? b.QueueTime)}";
     }
 
     int RenderHistory(Graphics? g, int y, Rectangle viewport)

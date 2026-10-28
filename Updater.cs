@@ -7,9 +7,30 @@ using System.Text.Json.Serialization;
 
 namespace DevOpsWatcher;
 
-sealed record UpdateInfo(Version Version, string ReleaseUrl, string FilePath);
+/// <summary>A newer release found on GitHub; nothing is downloaded until the user asks for it.</summary>
+sealed record UpdateInfo(Version Version, string ReleaseUrl, string DownloadUrl, string? Digest);
 
-/// <summary>Checks GitHub releases for a newer DevOpsWatcher.exe, downloads it and swaps it in place.</summary>
+public enum UpdateStage { Unsupported, Idle, Checking, UpToDate, Available, Installing, Failed }
+
+/// <summary>Where the update button is at; <see cref="Available"/> is set from <see cref="UpdateStage.Available"/> on.</summary>
+public sealed record UpdateStatus(UpdateStage Stage, Version? Available = null)
+{
+    /// <summary>Text for the update button in the dashboard and tray menu.</summary>
+    public string Label => Stage switch
+    {
+        UpdateStage.Unsupported => $"v{Updater.CurrentVersion.ToString(3)}",
+        UpdateStage.Checking => "Checking for updates…",
+        UpdateStage.UpToDate => $"Up to date (v{Updater.CurrentVersion.ToString(3)})",
+        UpdateStage.Available => $"Update to v{Available!.ToString(3)}",
+        UpdateStage.Installing => $"Updating to v{Available!.ToString(3)}…",
+        UpdateStage.Failed => "Update check failed – retry",
+        _ => "Check for updates",
+    };
+
+    public bool Clickable => Stage is UpdateStage.Idle or UpdateStage.UpToDate or UpdateStage.Available or UpdateStage.Failed;
+}
+
+/// <summary>Checks GitHub releases for a newer DevOpsWatcher.exe and, when the user asks, downloads it and swaps it in place.</summary>
 static partial class Updater
 {
     const string Repo = "ravndal/devops-pipline-watcher";
@@ -45,13 +66,18 @@ static partial class Updater
     [JsonSerializable(typeof(Release))]
     partial class ReleaseJsonContext : JsonSerializerContext;
 
-    /// <summary>Returns a downloaded, verified update, or null when already up to date.</summary>
-    public static async Task<UpdateInfo?> CheckAndDownloadAsync(CancellationToken ct = default)
+    static HttpClient CreateHttp()
     {
-        using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+        var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
         http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("DevOpsWatcher", CurrentVersion.ToString()));
         http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+        return http;
+    }
 
+    /// <summary>Returns the latest release when it's newer than this one, or null when already up to date.</summary>
+    public static async Task<UpdateInfo?> CheckAsync(CancellationToken ct = default)
+    {
+        using var http = CreateHttp();
         var json = await http.GetStringAsync($"https://api.github.com/repos/{Repo}/releases/latest", ct);
         var release = JsonSerializer.Deserialize(json, ReleaseJsonContext.Default.Release);
         if (release == null || release.Draft || release.Prerelease) return null;
@@ -60,19 +86,25 @@ static partial class Updater
 
         var asset = release.Assets.FirstOrDefault(a => a.Name.Equals(AssetName, StringComparison.OrdinalIgnoreCase))
             ?? throw new InvalidOperationException($"Release {release.TagName} has no {AssetName}.");
+        return new UpdateInfo(latest, release.HtmlUrl, asset.DownloadUrl, asset.Digest);
+    }
 
+    /// <summary>Downloads and verifies the update's exe; returns its local path.</summary>
+    public static async Task<string> DownloadAsync(UpdateInfo update, CancellationToken ct = default)
+    {
+        using var http = CreateHttp();
         Directory.CreateDirectory(DownloadDir);
-        var target = Path.Combine(DownloadDir, $"DevOpsWatcher-{latest}.exe");
-        if (!File.Exists(target) || !HashMatches(target, asset.Digest))
+        var target = Path.Combine(DownloadDir, $"DevOpsWatcher-{update.Version}.exe");
+        if (!File.Exists(target) || !HashMatches(target, update.Digest))
         {
             var partial = target + ".part";
-            await using (var stream = await http.GetStreamAsync(asset.DownloadUrl, ct))
+            await using (var stream = await http.GetStreamAsync(update.DownloadUrl, ct))
             await using (var file = File.Create(partial))
                 await stream.CopyToAsync(file, ct);
-            if (!HashMatches(partial, asset.Digest))
+            if (!HashMatches(partial, update.Digest))
             {
                 File.Delete(partial);
-                throw new InvalidOperationException($"Downloaded {AssetName} for {release.TagName} failed the checksum.");
+                throw new InvalidOperationException($"Downloaded {AssetName} for v{update.Version.ToString(3)} failed the checksum.");
             }
             File.Move(partial, target, overwrite: true);
         }
@@ -80,11 +112,11 @@ static partial class Updater
         foreach (var old in Directory.EnumerateFiles(DownloadDir).Where(f => !f.Equals(target, StringComparison.OrdinalIgnoreCase)))
             TryDelete(old);
 
-        return new UpdateInfo(latest, release.HtmlUrl, target);
+        return target;
     }
 
-    /// <summary>Puts the new exe in place of the running one and starts it. The caller exits afterwards.</summary>
-    public static void Install(UpdateInfo update)
+    /// <summary>Puts the downloaded exe in place of the running one and starts it. The caller exits afterwards.</summary>
+    public static void Install(string downloadedExe)
     {
         var exe = Environment.ProcessPath!;
         var backup = exe + ".old";
@@ -92,7 +124,7 @@ static partial class Updater
         File.Move(exe, backup, overwrite: true);
         try
         {
-            File.Copy(update.FilePath, exe);
+            File.Copy(downloadedExe, exe);
         }
         catch
         {

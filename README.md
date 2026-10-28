@@ -14,14 +14,14 @@ A small Windows tray app that watches selected Azure DevOps pipelines and GitHub
 
 - **Approvals** pop up in the bottom-right corner and stay until you **Approve**, **Reject** (asks you to confirm), **Open** it in the browser, or **Later** (snoozes it for 15 minutes; the icon keeps flashing).
 - **Other status changes** (started, stage changed, succeeded, failed, ...) show as toasts that fade after about 6 seconds. You can mute them from the tray menu.
-- **Left-click** the icon to open the dashboard: pending approvals plus the last 8 builds. Click a row to open it in the browser.
+- **Left-click** the icon to open the dashboard: pending approvals plus the last 8 builds. Click a row to open it in the browser. Click a panel's header to collapse it to one status icon per pipeline (hover an icon for details, click it to open the run); collapsed panels stay collapsed across restarts.
 - **Right-click** the icon for Refresh, Settings, Mute, Start with Windows, and Exit.
 
 ## Install & updates
 
 Download `DevOpsWatcher.exe` from the [latest release](https://github.com/ravndal/devops-pipline-watcher/releases/latest) and run it from a folder you can write to (for example `%LOCALAPPDATA%\DevOpsWatcher`).
 
-The app checks GitHub for a new release 30 seconds after start and then every 6 hours. It downloads the new exe, checks its SHA-256 against the release, and restarts into it as soon as no approval is waiting. Right-click the tray icon → **Check for updates** to check now. Set `"AutoUpdate": false` in `settings.json` to be asked instead (a toast, then **Restart to update** in the tray menu).
+The app never updates itself on its own. The dashboard footer (and the tray menu) has a **Check for updates** button; the app also looks quietly 30 seconds after start and then every 6 hours. When a newer release is found the button changes to **Update to vX.Y.Z**, and only clicking it downloads the new exe, checks its SHA-256 against the release, and restarts into it.
 
 ### Releasing
 
@@ -55,19 +55,24 @@ Run with `--demo` to try the UI with fake pipelines and no server. A deployment 
 
 ## Setup
 
-On first run Settings opens with **Add server**. Add as many servers as you like; Settings lists them with Add / Edit / Remove.
+On first run Settings opens with **Add server**. Add as many servers as you like; Settings lists them with Add / Edit / Remove. Adding a server starts by picking what to connect to, then asks only for what that target needs:
+
+| Target | You enter |
+|---|---|
+| Azure DevOps | Organization name (and optionally one project to list) + PAT |
+| Azure DevOps Server | Collection URL (`https://tfs.company.com/tfs/DefaultCollection`) + PAT or Windows sign-in |
+| GitHub | Token |
+| GitHub Enterprise | Server URL (`https://github.company.com` or `https://company.ghe.com`) + token |
 
 **Azure DevOps**
 
-1. Enter the organization URL (`https://dev.azure.com/yourorg`) or, for Azure DevOps Server, the collection URL (`https://tfs.company.com/tfs/DefaultCollection`).
-2. Sign in with a **PAT** with these scopes: *Build (Read & execute)* and *Project and Team (Read)*. On-prem servers can use Windows authentication instead.
-3. Click **Connect**, expand projects, and tick the pipelines you want to track.
+1. Use a **PAT** with these scopes: *Build (Read & execute)* and *Project and Team (Read)*. Azure DevOps Server can use Windows authentication instead.
+2. Click **Connect**, expand projects, and tick the pipelines you want to track.
 
 **GitHub Actions**
 
-1. Keep `https://github.com`, or enter your GitHub Enterprise URL (`https://github.company.com` or `https://company.ghe.com`).
-2. Use a fine-grained token with repository permissions *Actions (Read)* and *Deployments (Read & write)*, or a classic token with the `repo` scope. Approving needs the write permission and that you're a required reviewer on the environment.
-3. Click **Connect**, expand repositories, and tick the workflows you want to track.
+1. Use a fine-grained token with repository permissions *Actions (Read)* and *Deployments (Read & write)*, or a classic token with the `repo` scope. Approving needs the write permission and that you're a required reviewer on the environment.
+2. Click **Connect**, expand repositories, and tick the workflows you want to track.
 
 Settings are saved in `%APPDATA%\DevOpsWatcher\settings.json`. Tokens are encrypted with Windows DPAPI for your user. Settings from older versions (one Azure DevOps server) are moved into the server list on first start.
 

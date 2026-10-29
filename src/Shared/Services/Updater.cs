@@ -33,7 +33,7 @@ public sealed record UpdateStatus(UpdateStage Stage, Version? Available = null)
 /// <summary>Checks GitHub releases for a newer executable and, when the user asks, downloads it and swaps it in place.</summary>
 static partial class Updater
 {
-    const string Repo = "ravndal/devops-pipline-watcher";
+    const string Repo = "ravndal/build-pulse";
     public const string UpdatedArg = "--updated";
 
     /// <summary>The release asset this build updates from: BuildPulse.exe on Windows, one executable per runtime elsewhere.</summary>

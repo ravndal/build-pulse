@@ -2,7 +2,7 @@
 #:property TargetFramework=net10.0-windows
 
 // Renders the app icon to assets/app.ico (multi-size) and assets/app.png (256px preview).
-// Run from the repo root: dotnet run --file assets/make-icon.cs
+// Run from the repo root: dotnet run --file src/tools/make-icon.cs
 //
 // The design is provider-neutral on purpose: an eye (the "watcher") around a three-stage
 // pipeline, so it fits Azure DevOps today and GitHub Actions later.

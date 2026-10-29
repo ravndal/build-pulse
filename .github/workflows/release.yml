@@ -22,10 +22,40 @@ jobs:
         shell: pwsh
         run: |
           $version = '${{ github.ref_name }}'.TrimStart('v')
-          dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:Version=$version -o publish
+          dotnet publish src/DevOpsWatcher.WinForms -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:Version=$version -o publish
 
       - name: Create GitHub release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create '${{ github.ref_name }}' publish/DevOpsWatcher.exe --title '${{ github.ref_name }}' --generate-notes
+
+  # The Avalonia build for macOS and Linux, one single-file executable per runtime (named as Updater.AssetName expects).
+  # macOS builds run on a Mac so the SDK can ad-hoc sign the executable, which Apple silicon requires.
+  cross-platform:
+    needs: release
+    strategy:
+      matrix:
+        include:
+          - { rid: osx-arm64, os: macos-latest }
+          - { rid: osx-x64, os: macos-latest }
+          - { rid: linux-x64, os: ubuntu-latest }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish single-file executable
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          dotnet publish src/DevOpsWatcher.Avalonia -c Release -r ${{ matrix.rid }} --self-contained \
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:Version=$version -o publish
+          mv publish/DevOpsWatcher "publish/DevOpsWatcher-${{ matrix.rid }}"
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" "publish/DevOpsWatcher-${{ matrix.rid }}"

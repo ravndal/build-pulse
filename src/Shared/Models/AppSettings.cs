@@ -1,9 +1,5 @@
-using System.ComponentModel;
-using System.Runtime.InteropServices;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.Win32;
 
 namespace DevOpsWatcher;
 
@@ -32,15 +28,15 @@ public sealed class ServerConfig
     /// <summary>Azure DevOps Services only: when set, setup lists just this project of the organization.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Project { get; set; }
-    /// <summary>PAT encrypted with DPAPI for the current Windows user.</summary>
+    /// <summary>PAT protected by <see cref="Secrets"/>: DPAPI-encrypted on Windows, a Keychain reference on macOS.</summary>
     public string? ProtectedPat { get; set; }
     public List<TrackedPipeline> Pipelines { get; set; } = [];
 
     [JsonIgnore]
     public string? Pat
     {
-        get => Dpapi.Unprotect(ProtectedPat);
-        set => ProtectedPat = Dpapi.Protect(value);
+        get => Secrets.Unprotect(ProtectedPat);
+        set => ProtectedPat = Secrets.Protect(value, ProtectedPat);
     }
 
     [JsonIgnore]
@@ -174,81 +170,3 @@ public sealed class AppSettings
 [JsonSourceGenerationOptions(WriteIndented = true)]
 [JsonSerializable(typeof(AppSettings))]
 partial class SettingsJsonContext : JsonSerializerContext;
-
-static class Startup
-{
-    const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    const string ValueName = "DevOpsWatcher";
-
-    public static bool IsEnabled
-    {
-        get
-        {
-            using var key = Registry.CurrentUser.OpenSubKey(RunKey);
-            return key?.GetValue(ValueName) != null;
-        }
-    }
-
-    public static void Set(bool enabled)
-    {
-        using var key = Registry.CurrentUser.CreateSubKey(RunKey);
-        if (enabled) key.SetValue(ValueName, $"\"{Environment.ProcessPath}\"");
-        else key.DeleteValue(ValueName, throwOnMissingValue: false);
-    }
-}
-
-/// <summary>Windows DPAPI (CurrentUser scope) without an extra NuGet dependency.</summary>
-static class Dpapi
-{
-    [StructLayout(LayoutKind.Sequential)]
-    struct DataBlob
-    {
-        public int cbData;
-        public IntPtr pbData;
-    }
-
-    [DllImport("crypt32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    static extern bool CryptProtectData(ref DataBlob dataIn, string? description, IntPtr entropy,
-        IntPtr reserved, IntPtr prompt, int flags, ref DataBlob dataOut);
-
-    [DllImport("crypt32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    static extern bool CryptUnprotectData(ref DataBlob dataIn, IntPtr description, IntPtr entropy,
-        IntPtr reserved, IntPtr prompt, int flags, ref DataBlob dataOut);
-
-    [DllImport("kernel32.dll")]
-    static extern IntPtr LocalFree(IntPtr handle);
-
-    const int UiForbidden = 0x1;
-
-    public static string? Protect(string? plain) =>
-        string.IsNullOrEmpty(plain) ? null : Convert.ToBase64String(Run(Encoding.UTF8.GetBytes(plain), protect: true));
-
-    public static string? Unprotect(string? cipher)
-    {
-        if (string.IsNullOrEmpty(cipher)) return null;
-        try { return Encoding.UTF8.GetString(Run(Convert.FromBase64String(cipher), protect: false)); }
-        catch { return null; }
-    }
-
-    static byte[] Run(byte[] input, bool protect)
-    {
-        var dataIn = new DataBlob { cbData = input.Length, pbData = Marshal.AllocHGlobal(input.Length) };
-        var dataOut = new DataBlob();
-        try
-        {
-            Marshal.Copy(input, 0, dataIn.pbData, input.Length);
-            bool ok = protect
-                ? CryptProtectData(ref dataIn, "DevOpsWatcher", 0, 0, 0, UiForbidden, ref dataOut)
-                : CryptUnprotectData(ref dataIn, 0, 0, 0, 0, UiForbidden, ref dataOut);
-            if (!ok) throw new Win32Exception(Marshal.GetLastWin32Error());
-            var result = new byte[dataOut.cbData];
-            Marshal.Copy(dataOut.pbData, result, 0, dataOut.cbData);
-            return result;
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(dataIn.pbData);
-            if (dataOut.pbData != 0) LocalFree(dataOut.pbData);
-        }
-    }
-}

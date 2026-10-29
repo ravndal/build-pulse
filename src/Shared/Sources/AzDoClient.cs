@@ -180,7 +180,7 @@ public sealed class AzDoClient : IPipelineSource
     async Task<JsonNode?> SendAsync(string endpoint, HttpMethod method, string relativeUrl, JsonNode? body = null)
     {
         await _limiter.AcquireAsync(endpoint);
-        using var request = new HttpRequestMessage(method, $"{BaseUrl}/{relativeUrl}");
+        using var request = new HttpRequestMessage(method, Https.Require($"{BaseUrl}/{relativeUrl}"));
         if (body != null)
             request.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
 

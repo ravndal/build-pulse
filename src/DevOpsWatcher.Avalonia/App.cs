@@ -67,6 +67,8 @@ sealed class App : Application
             TransparencyLevelHint = [WindowTransparencyLevel.Transparent],
             Content = _dashboard,
         };
+        // The measured size can be off before the first layout, and the content grows as runs arrive: keep it anchored.
+        _flyout.SizeChanged += (_, e) => { if (_flyout.IsVisible) PlaceFlyout(e.NewSize); };
         // On macOS the window can lose focus right as it opens (the tray menu is still closing), so ignore that.
         _flyout.Deactivated += (_, _) =>
         {
@@ -300,7 +302,7 @@ sealed class App : Application
     }
 
     /// <summary>Below the menu bar on macOS, above the taskbar elsewhere; right-aligned either way.</summary>
-    void PlaceFlyout()
+    void PlaceFlyout(Size? actual = null)
     {
         var screen = _flyout!.Screens.Primary;
         if (screen == null) return;
@@ -308,8 +310,8 @@ sealed class App : Application
         double scale = screen.Scaling;
         _dashboard!.MaxContentHeight = area.Height / scale * 0.7;
         // Measure the content, not the window: once shown and hidden, the window measures as 0×0.
-        _dashboard.Measure(Size.Infinity);
-        var size = PixelSize.FromSize(_dashboard.DesiredSize, scale);
+        if (actual == null) _dashboard.Measure(Size.Infinity);
+        var size = PixelSize.FromSize(actual ?? _dashboard.DesiredSize, scale);
         int margin = (int)(8 * scale);
         int x = area.Right - size.Width - margin;
         int y = OperatingSystem.IsMacOS() ? area.Y + margin : area.Bottom - size.Height - margin;

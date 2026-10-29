@@ -337,6 +337,7 @@ sealed partial class ServerForm : Form
                 if (url == "") { SetStatus("Enter the server URL.", error: true); return null; }
                 if (!url.Contains("://")) url = "https://" + url;
                 if (!Uri.TryCreate(url, UriKind.Absolute, out _)) { SetStatus("That isn't a valid URL.", error: true); return null; }
+                if (Https.Parse(url) == null) { SetStatus("The server must use https.", error: true); return null; }
                 break;
         }
 

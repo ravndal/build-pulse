@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DevOpsWatcher.Avalonia/DevOpsWatcher.Avalonia.csproj" />
+    <Project Path="src/DevOpsWatcher.WinForms/DevOpsWatcher.WinForms.csproj" />
+  </Folder>
+</Solution>

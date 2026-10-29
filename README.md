@@ -38,18 +38,32 @@ The Release workflow publishes the single-file exe with that version and creates
 Requires the .NET 10 SDK.
 
 ```bash
-dotnet build -c Release
+dotnet build src/DevOpsWatcher.WinForms -c Release
 ```
 
 ```bash
-bin/Release/net10.0-windows/DevOpsWatcher.exe
+src/DevOpsWatcher.WinForms/bin/Release/net10.0-windows/DevOpsWatcher.exe
 ```
 
 To get a single self-contained exe:
 
 ```bash
-dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish
+dotnet publish src/DevOpsWatcher.WinForms -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish
 ```
+
+The cross-platform (macOS, Linux, Windows) Avalonia build is in `src/DevOpsWatcher.Avalonia`; `DevOpsWatcher.slnx` opens both apps.
+
+### Repository layout
+
+| Folder | Contents |
+|---|---|
+| `src/Shared/Models` | Settings and pipeline/run data types |
+| `src/Shared/Sources` | Azure DevOps and GitHub API clients, demo source, rate limiter |
+| `src/Shared/Services` | Polling, self-update, run at startup, secret storage |
+| `src/Shared/Infrastructure` | JSON, logging and formatting helpers |
+| `src/DevOpsWatcher.WinForms` | Windows tray app (WinForms UI) |
+| `src/DevOpsWatcher.Avalonia` | Cross-platform tray app (Avalonia UI) |
+| `src/tools` | `make-icon.cs`, which regenerates `assets/app.ico` and `assets/app.png` |
 
 Run with `--demo` to try the UI with fake pipelines and no server. A deployment asks for approval about 45 seconds after start.
 

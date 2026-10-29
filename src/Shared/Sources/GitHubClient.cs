@@ -30,7 +30,7 @@ public sealed class GitHubClient : IPipelineSource
         _http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         _http.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
-        _http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("DevOpsWatcher", Updater.CurrentVersion.ToString(3)));
+        _http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("DevOpsWatcher", (typeof(GitHubClient).Assembly.GetName().Version ?? new Version(0, 0)).ToString(3)));
         if (!string.IsNullOrEmpty(token))
             _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
     }
@@ -230,7 +230,7 @@ public sealed class GitHubClient : IPipelineSource
     async Task<JsonNode?> SendAsync(string endpoint, HttpMethod method, string relativeUrl, JsonNode? body = null)
     {
         await _limiter.AcquireAsync(endpoint);
-        var url = $"{ApiUrl}/{relativeUrl}";
+        var url = Https.Require($"{ApiUrl}/{relativeUrl}");
         using var request = new HttpRequestMessage(method, url);
         if (body != null)
             request.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");

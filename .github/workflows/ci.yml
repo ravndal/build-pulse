@@ -25,3 +25,27 @@ jobs:
         with:
           name: DevOpsWatcher-${{ github.sha }}
           path: publish/DevOpsWatcher.exe
+
+  # Trimming can drop code that is only reached at runtime, so render every window from the trimmed
+  # macOS and Linux executables (off-screen, no tray or network) as a smoke test.
+  trimmed-smoke:
+    strategy:
+      matrix:
+        include:
+          - { rid: osx-arm64, os: macos-latest }
+          - { rid: linux-x64, os: ubuntu-latest }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish trimmed single-file executable
+        run: dotnet publish src/DevOpsWatcher.Avalonia -c Release -r ${{ matrix.rid }} --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
+
+      - name: Render screenshots
+        run: |
+          publish/DevOpsWatcher --screenshots shots
+          test "$(ls shots/*.png | wc -l)" -eq 10

@@ -23,6 +23,9 @@ public sealed class GitHubClient : IPipelineSource
     readonly Dictionary<string, (string ETag, string Body)> _etags = [];
     /// <summary>Repos already logged as redirected, so a renamed repo is logged once, not on every poll.</summary>
     readonly HashSet<string> _redirectsLogged = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Reset time of the quota window last logged, and whether that window's low-quota warning went out.</summary>
+    long _quotaReset;
+    bool _quotaWarned;
 
     public string ApiUrl { get; }
 
@@ -275,6 +278,7 @@ public sealed class GitHubClient : IPipelineSource
 
         using (response)
         {
+            LogQuota(response);
             if (response.StatusCode == HttpStatusCode.NotModified && cacheable && cached.Body != null)
                 return Parse(cached.Body);
 
@@ -321,6 +325,28 @@ public sealed class GitHubClient : IPipelineSource
         relativeUrl.Split('/', '?') is ["repos", var owner, var repo, ..] ? $"{owner}/{repo}" : relativeUrl;
 
     static JsonNode? Parse(string text) => string.IsNullOrWhiteSpace(text) ? null : JsonNode.Parse(text);
+
+    /// <summary>
+    /// Logs the hourly quota once per window, and again when it runs low. The quota is shared by every personal
+    /// access token of the same user, so usage already high at the first call points at another tool.
+    /// </summary>
+    void LogQuota(HttpResponseMessage response)
+    {
+        if (!long.TryParse(Header(response, "x-ratelimit-reset"), out var reset)
+            || !int.TryParse(Header(response, "x-ratelimit-limit"), out var limit)
+            || !int.TryParse(Header(response, "x-ratelimit-remaining"), out var remaining)) return;
+        bool newWindow = reset != _quotaReset;
+        bool low = remaining <= limit / 10;
+        if (!newWindow && (!low || _quotaWarned)) return;
+        if (newWindow) _quotaWarned = false;
+        _quotaReset = reset;
+        _quotaWarned |= low;
+        var resetsAt = DateTimeOffset.FromUnixTimeSeconds(reset).ToLocalTime();
+        Log.Write($"GitHub quota for {ApiUrl}: {limit - remaining}/{limit} used, resets {resetsAt:HH:mm:ss}{(low ? " (running low)" : "")}");
+    }
+
+    static string? Header(HttpResponseMessage response, string name) =>
+        response.Headers.TryGetValues(name, out var values) ? values.FirstOrDefault() : null;
 
     static TimeSpan? ResetDelay(HttpResponseMessage response)
     {

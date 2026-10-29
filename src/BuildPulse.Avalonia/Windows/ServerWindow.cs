@@ -59,6 +59,10 @@ sealed partial class ServerWindow : Window
     Target _target;
     IPipelineSource? _client;
     List<(ProjectInfo Project, List<DefinitionInfo>? Definitions)> _projects = [];
+    /// <summary>True once the server has listed its projects, so tracked pipelines it lacks can be shown as missing.</summary>
+    bool _listed;
+
+    const string MissingTag = "missing";
 
     ServerKind Kind => _target is Target.GitHub or Target.GitHubEnterprise ? ServerKind.GitHub : ServerKind.AzureDevOps;
 
@@ -230,6 +234,7 @@ sealed partial class ServerWindow : Window
             _client = null;
             _tracked.Clear();
             _projects = [];
+            _listed = false;
             RebuildTree();
             SetStatus("");
         }
@@ -349,6 +354,7 @@ sealed partial class ServerWindow : Window
         try
         {
             var projects = await _client.GetProjectsAsync();
+            _listed = true;
             if (server.Project is { } only)
             {
                 projects = projects.Where(p => p.Name.Equals(only, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -391,6 +397,7 @@ sealed partial class ServerWindow : Window
             var definitions = await _client.GetDefinitionsAsync(project.Name);
             _projects[index] = (project, definitions);
             FillProjectNode(projectNode, project, definitions);
+            UpdateMissingNode();
         }
         catch (Exception ex)
         {
@@ -432,6 +439,39 @@ sealed partial class ServerWindow : Window
             }
             _tree.Items.Add(node);
         }
+        UpdateMissingNode();
+    }
+
+    /// <summary>
+    /// Tracked pipelines the server no longer lists (a deleted or renamed repo, project or pipeline) get a node of
+    /// their own at the top, so they can still be unticked. Rebuilt whenever more of the server has been loaded.
+    /// </summary>
+    void UpdateMissingNode()
+    {
+        if (_tree.Items.OfType<TreeViewItem>().FirstOrDefault(n => n.Tag is MissingTag) is { } old) _tree.Items.Remove(old);
+        if (!_listed) return;
+        var missing = _tracked.Values.Where(IsMissing).OrderBy(p => p.Project).ThenBy(p => p.Name).ToList();
+        if (missing.Count == 0) return;
+        var node = new TreeViewItem
+        {
+            Header = new TextBlock { Text = "Not found on the server – untick to stop tracking", Foreground = new SolidColorBrush(Palette.Red) },
+            Tag = MissingTag,
+            IsExpanded = true,
+        };
+        foreach (var pipeline in missing)
+        {
+            var box = new CheckBox { Content = $"{pipeline.Project} / {pipeline.Name}", IsChecked = true };
+            box.Click += (_, _) => SetTracked(pipeline, box.IsChecked == true);
+            node.Items.Add(new TreeViewItem { Header = box });
+        }
+        _tree.Items.Insert(0, node);
+    }
+
+    /// <summary>Its project isn't listed, or the project's pipelines are loaded and it isn't among them.</summary>
+    bool IsMissing(TrackedPipeline pipeline)
+    {
+        var (project, definitions) = _projects.FirstOrDefault(p => p.Project.Name.Equals(pipeline.Project, StringComparison.OrdinalIgnoreCase));
+        return project == null || (definitions != null && definitions.All(d => d.Id != pipeline.DefinitionId));
     }
 
     void FillProjectNode(TreeViewItem node, ProjectInfo project, List<DefinitionInfo> definitions)

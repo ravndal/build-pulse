@@ -15,11 +15,14 @@ public sealed class GitHubClient : IPipelineSource
 {
     const int MaxRepoPages = 10;
     const int MaxCachedUrls = 300;
+    const int MaxRedirects = 3;
 
     readonly HttpClient _http;
     readonly RateLimiter _limiter;
     /// <summary>Last ETag and body per GET URL. A 304 reply is free: it doesn't count against GitHub's rate limit.</summary>
     readonly Dictionary<string, (string ETag, string Body)> _etags = [];
+    /// <summary>Repos already logged as redirected, so a renamed repo is logged once, not on every poll.</summary>
+    readonly HashSet<string> _redirectsLogged = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Reset time of the quota window last logged, and whether that window's low-quota warning went out.</summary>
     long _quotaReset;
     bool _quotaWarned;
@@ -30,7 +33,7 @@ public sealed class GitHubClient : IPipelineSource
     {
         ApiUrl = ApiBase(serverUrl);
         _limiter = new RateLimiter(RateLimiter.UserKey(ApiUrl, false, token), rateLimits ?? new());
-        _http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        _http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(30) };
         _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         _http.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
         _http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue(AppInfo.Id, (typeof(GitHubClient).Assembly.GetName().Version ?? new Version(0, 0)).ToString(3)));
@@ -234,17 +237,35 @@ public sealed class GitHubClient : IPipelineSource
     {
         await _limiter.AcquireAsync(endpoint);
         var url = Https.Require($"{ApiUrl}/{relativeUrl}");
-        using var request = new HttpRequestMessage(method, url);
-        if (body != null)
-            request.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
         bool cacheable = method == HttpMethod.Get;
-        if (cacheable && _etags.TryGetValue(url, out var cached))
-            request.Headers.TryAddWithoutValidation("If-None-Match", cached.ETag);
+        _etags.TryGetValue(url, out var cached);
+
+        async Task<HttpResponseMessage> Send(Uri target)
+        {
+            using var request = new HttpRequestMessage(method, target);
+            if (body != null)
+                request.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
+            if (cacheable && cached.ETag != null)
+                request.Headers.TryAddWithoutValidation("If-None-Match", cached.ETag);
+            return await _http.SendAsync(request);
+        }
 
         HttpResponseMessage response;
         try
         {
-            response = await _http.SendAsync(request);
+            var target = new Uri(url);
+            response = await Send(target);
+            // HttpClient drops the token when it follows a redirect, so a renamed repo's 301 would go out
+            // anonymously and use up the 60-an-hour limit per IP. Follow redirects on the API host here instead.
+            for (int hops = 0; hops < MaxRedirects && RedirectTarget(response, target) is { } next; hops++)
+            {
+                response.Dispose();
+                if (_redirectsLogged.Add(RepoOf(relativeUrl)))
+                    Log.Write($"GitHub redirected {RepoOf(relativeUrl)}: the repo was probably renamed. Re-add it under its new name.");
+                // Each hop is a real request, so it takes a slot like any other.
+                await _limiter.AcquireAsync(endpoint);
+                response = await Send(target = next);
+            }
         }
         catch (TaskCanceledException)
         {
@@ -258,7 +279,7 @@ public sealed class GitHubClient : IPipelineSource
         using (response)
         {
             LogQuota(response);
-            if (response.StatusCode == HttpStatusCode.NotModified && cacheable && _etags.TryGetValue(url, out cached))
+            if (response.StatusCode == HttpStatusCode.NotModified && cacheable && cached.Body != null)
                 return Parse(cached.Body);
 
             // Secondary limits send Retry-After; the hourly limit sends remaining=0 and a reset time.
@@ -290,6 +311,18 @@ public sealed class GitHubClient : IPipelineSource
             return Parse(text);
         }
     }
+
+    /// <summary>Where a redirect points, when it stays on https and the same API host; null otherwise.</summary>
+    static Uri? RedirectTarget(HttpResponseMessage response, Uri from)
+    {
+        if ((int)response.StatusCode is not (301 or 302 or 307 or 308) || response.Headers.Location is not { } location) return null;
+        var next = location.IsAbsoluteUri ? location : new Uri(from, location);
+        return Https.Parse(next.AbsoluteUri) is { } uri && string.Equals(uri.Host, from.Host, StringComparison.OrdinalIgnoreCase) ? uri : null;
+    }
+
+    /// <summary>"repos/owner/repo" from a relative API URL, or the URL itself.</summary>
+    static string RepoOf(string relativeUrl) =>
+        relativeUrl.Split('/', '?') is ["repos", var owner, var repo, ..] ? $"{owner}/{repo}" : relativeUrl;
 
     static JsonNode? Parse(string text) => string.IsNullOrWhiteSpace(text) ? null : JsonNode.Parse(text);
 

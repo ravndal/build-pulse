@@ -7,11 +7,17 @@ namespace DevOpsWatcher;
 /// <summary>Keeps PATs out of settings.json: DPAPI-encrypted on Windows, stored in the login Keychain on macOS.</summary>
 static class Secrets
 {
-    public static string? Protect(string? plain)
+    public static string? Protect(string? plain, string? previousStored = null)
     {
         if (string.IsNullOrEmpty(plain)) return null;
         if (OperatingSystem.IsWindows()) return Dpapi.Protect(plain);
-        if (OperatingSystem.IsMacOS()) return Keychain.Add(plain);
+        if (OperatingSystem.IsMacOS())
+        {
+            var stored = Keychain.Add(plain);
+            if (!string.IsNullOrEmpty(previousStored) && previousStored.StartsWith(Keychain.Prefix, StringComparison.Ordinal))
+                Delete(previousStored);
+            return stored;
+        }
         throw new PlatformNotSupportedException("No secure store for tokens on this OS.");
     }
 

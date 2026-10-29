@@ -36,7 +36,7 @@ public sealed class ServerConfig
     public string? Pat
     {
         get => Secrets.Unprotect(ProtectedPat);
-        set => ProtectedPat = Secrets.Protect(value);
+        set => ProtectedPat = Secrets.Protect(value, ProtectedPat);
     }
 
     [JsonIgnore]

@@ -115,7 +115,7 @@ sealed class App : Application
         StartUpdater();
         _watcher.Apply(_watcher.Settings);
         if (OpenSettings || !_watcher.Settings.IsConfigured) ShowSettings();
-        if (Updated) Toast(Palette.Green, $"Updated to v{Updater.CurrentVersion.ToString(3)}", "Build Pulse is up to date.", null);
+        if (Updated) Toast(Palette.Green, $"Updated to v{Updater.CurrentVersion.ToString(3)}", $"{AppInfo.Name} is up to date.", null);
     }
 
     static NativeMenuItem Item(string header, Action onClick)

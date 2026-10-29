@@ -23,6 +23,14 @@ static class Secrets
             return OperatingSystem.IsMacOS() ? Keychain.Find(stored[Keychain.Prefix.Length..]) : null;
         return OperatingSystem.IsWindows() ? Dpapi.Unprotect(stored) : null;
     }
+
+    /// <summary>Removes a token that's no longer referenced. Only Keychain items live outside settings.json; DPAPI blobs need nothing.</summary>
+    public static void Delete(string? stored)
+    {
+        if (string.IsNullOrEmpty(stored) || !stored.StartsWith(Keychain.Prefix, StringComparison.Ordinal) || !OperatingSystem.IsMacOS()) return;
+        try { Keychain.Delete(stored[Keychain.Prefix.Length..]); }
+        catch (Exception ex) { Log.Write($"Couldn't delete a Keychain token: {ex.Message}"); }
+    }
 }
 
 /// <summary>Windows DPAPI (CurrentUser scope) without an extra NuGet dependency.</summary>
@@ -100,8 +108,18 @@ static class Keychain
     static extern int SecKeychainFindGenericPassword(IntPtr keychainOrArray, uint serviceLength, byte[] service,
         uint accountLength, byte[] account, out uint passwordLength, out IntPtr password, IntPtr itemRef);
 
+    [DllImport(Security, EntryPoint = "SecKeychainFindGenericPassword")]
+    static extern int SecKeychainFindGenericPasswordItem(IntPtr keychainOrArray, uint serviceLength, byte[] service,
+        uint accountLength, byte[] account, IntPtr passwordLength, IntPtr password, out IntPtr itemRef);
+
     [DllImport(Security)]
     static extern int SecKeychainItemFreeContent(IntPtr attrList, IntPtr data);
+
+    [DllImport(Security)]
+    static extern int SecKeychainItemDelete(IntPtr itemRef);
+
+    [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
+    static extern void CFRelease(IntPtr cf);
 
     /// <summary>Stores the token under a fresh account name and returns the reference to keep in settings.</summary>
     public static string Add(string plain)
@@ -126,5 +144,19 @@ static class Keychain
             return Encoding.UTF8.GetString(bytes);
         }
         finally { SecKeychainItemFreeContent(0, data); }
+    }
+
+    public static void Delete(string account)
+    {
+        byte[] s = Encoding.UTF8.GetBytes(Service), a = Encoding.UTF8.GetBytes(account);
+        int status = SecKeychainFindGenericPasswordItem(0, (uint)s.Length, s, (uint)a.Length, a, 0, 0, out var item);
+        if (status == ErrSecItemNotFound) return;
+        if (status != 0) throw new InvalidOperationException($"OSStatus {status}");
+        try
+        {
+            status = SecKeychainItemDelete(item);
+            if (status != 0) throw new InvalidOperationException($"OSStatus {status}");
+        }
+        finally { CFRelease(item); }
     }
 }

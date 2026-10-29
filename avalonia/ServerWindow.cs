@@ -45,6 +45,12 @@ sealed partial class ServerWindow : Window
     readonly TextBox _filter = new();
     readonly TreeView _tree = new() { MinHeight = 160 };
     readonly TextBlock _trackedCount = FormGrid.Hint();
+
+    // The token this window stored (a Keychain item on macOS) and the text it came from, so Connect and OK
+    // reuse one item instead of adding a new one on every attempt; it's deleted if the window is cancelled.
+    string? _storedPat;
+    string? _storedPatText;
+    bool _accepted;
     readonly TextBlock _urlCaption;
 
     /// <summary>Rows that only some targets have: caption and control shown or hidden together.</summary>
@@ -134,7 +140,11 @@ sealed partial class ServerWindow : Window
             if (_current.Url != "" && _current.HasCredentials) await ConnectAsync();
             else _pat.Focus();
         };
-        Closed += (_, _) => _client?.Dispose();
+        Closed += (_, _) =>
+        {
+            _client?.Dispose();
+            if (!_accepted) Secrets.Delete(_storedPat);
+        };
     }
 
     /// <summary>Shows the details page's fields for <paramref name="target"/>.</summary>
@@ -308,7 +318,16 @@ sealed partial class ServerWindow : Window
         };
         try
         {
-            if (_pat.Text?.Trim() is { Length: > 0 } pat) server.Pat = pat;
+            if (_pat.Text?.Trim() is { Length: > 0 } pat)
+            {
+                if (pat != _storedPatText)
+                {
+                    var stored = Secrets.Protect(pat);
+                    Secrets.Delete(_storedPat);
+                    (_storedPat, _storedPatText) = (stored, pat);
+                }
+                server.ProtectedPat = _storedPat;
+            }
         }
         catch (Exception ex)
         {
@@ -464,6 +483,7 @@ sealed partial class ServerWindow : Window
         var server = ReadServer();
         if (server == null) return;
         Log.Write($"Settings: server {server.Kind} {server.DisplayName} with {server.Pipelines.Count} pipelines");
+        _accepted = true;
         Close(server);
     }
 }

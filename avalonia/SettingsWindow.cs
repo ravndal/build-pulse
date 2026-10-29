@@ -11,6 +11,9 @@ sealed class SettingsWindow : Window
     readonly AppSettings _current;
     readonly bool _demo;
     readonly List<ServerConfig> _servers;
+    // Every stored token seen here; whichever ones the kept settings don't reference are deleted on close.
+    readonly HashSet<string> _seenPats;
+    bool _saved;
 
     readonly ListBox _serverList = new() { MinHeight = 120 };
     readonly Button _edit = new() { Content = "Edit…" };
@@ -34,7 +37,13 @@ sealed class SettingsWindow : Window
         _current = current;
         _demo = demo;
         _servers = current.Servers.Select(s => s.Clone()).ToList();
+        _seenPats = PatsOf(_servers);
         _rateLimits = current.RateLimits;
+        Closed += (_, _) =>
+        {
+            var kept = PatsOf(_saved ? _servers : _current.Servers);
+            foreach (var pat in _seenPats.Except(kept)) Secrets.Delete(pat);
+        };
 
         Title = "DevOps Watcher – Settings";
         Width = 620;
@@ -95,6 +104,7 @@ sealed class SettingsWindow : Window
     {
         var server = await new ServerWindow(existing, _rateLimits, _demo).ShowDialog<ServerConfig?>(this);
         if (server == null) return;
+        if (server.ProtectedPat != null) _seenPats.Add(server.ProtectedPat);
         int index = existing != null ? _servers.IndexOf(existing) : -1;
         if (index >= 0) _servers[index] = server;
         else _servers.Add(server);
@@ -171,7 +181,11 @@ sealed class SettingsWindow : Window
             }
         }
         Log.Write($"Settings: saved {result.Servers.Count} servers");
+        _saved = !_demo;
         Saved?.Invoke(result);
         Close();
     }
+
+    static HashSet<string> PatsOf(IEnumerable<ServerConfig> servers) =>
+        servers.Select(s => s.ProtectedPat).OfType<string>().ToHashSet();
 }

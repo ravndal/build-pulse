@@ -11,6 +11,8 @@
     <RootNamespace>DevOpsWatcher</RootNamespace>
     <Version>1.0.0</Version>
     <ApplicationIcon>assets\app.ico</ApplicationIcon>
+    <!-- The cross-platform (Avalonia) app lives in its own project and links the shared files from here. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);avalonia\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <!-- Published exe: trim unused framework code and compress the single file (~116 MB -> ~17 MB).

@@ -30,12 +30,14 @@ public sealed record UpdateStatus(UpdateStage Stage, Version? Available = null)
     public bool Clickable => Stage is UpdateStage.Idle or UpdateStage.UpToDate or UpdateStage.Available or UpdateStage.Failed;
 }
 
-/// <summary>Checks GitHub releases for a newer DevOpsWatcher.exe and, when the user asks, downloads it and swaps it in place.</summary>
+/// <summary>Checks GitHub releases for a newer executable and, when the user asks, downloads it and swaps it in place.</summary>
 static partial class Updater
 {
     const string Repo = "ravndal/devops-pipline-watcher";
-    const string AssetName = "DevOpsWatcher.exe";
     public const string UpdatedArg = "--updated";
+
+    /// <summary>The release asset this build updates from: the WinForms exe, or one cross-platform executable per runtime.</summary>
+    public static string AssetName { get; set; } = "DevOpsWatcher.exe";
 
     static readonly string DownloadDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DevOpsWatcher", "update");
@@ -92,16 +94,17 @@ static partial class Updater
     /// <summary>Downloads and verifies the update's exe; returns its local path.</summary>
     public static async Task<string> DownloadAsync(UpdateInfo update, CancellationToken ct = default)
     {
+        var expected = ExpectedHash(update);
         using var http = CreateHttp();
         Directory.CreateDirectory(DownloadDir);
-        var target = Path.Combine(DownloadDir, $"DevOpsWatcher-{update.Version}.exe");
-        if (!File.Exists(target) || !HashMatches(target, update.Digest))
+        var target = Path.Combine(DownloadDir, $"DevOpsWatcher-{update.Version}.download");
+        if (!File.Exists(target) || !HashMatches(target, expected))
         {
             var partial = target + ".part";
-            await using (var stream = await http.GetStreamAsync(update.DownloadUrl, ct))
+            await using (var stream = await http.GetStreamAsync(Https.Require(update.DownloadUrl), ct))
             await using (var file = File.Create(partial))
                 await stream.CopyToAsync(file, ct);
-            if (!HashMatches(partial, update.Digest))
+            if (!HashMatches(partial, expected))
             {
                 File.Delete(partial);
                 throw new InvalidOperationException($"Downloaded {AssetName} for v{update.Version.ToString(3)} failed the checksum.");
@@ -116,15 +119,22 @@ static partial class Updater
     }
 
     /// <summary>Puts the downloaded exe in place of the running one and starts it. The caller exits afterwards.</summary>
-    public static void Install(string downloadedExe)
+    public static void Install(UpdateInfo update, string downloadedExe)
     {
+        // Verify the exact bytes that get written, so the file can't be swapped between the check and the copy.
+        var bytes = File.ReadAllBytes(downloadedExe);
+        if (!CryptographicOperations.FixedTimeEquals(SHA256.HashData(bytes), ExpectedHash(update)))
+            throw new InvalidOperationException($"Downloaded {AssetName} for v{update.Version.ToString(3)} failed the checksum.");
+
         var exe = Environment.ProcessPath!;
         var backup = exe + ".old";
-        // Windows lets a running exe be renamed but not overwritten.
+        // Windows lets a running exe be renamed but not overwritten; macOS and Linux allow both.
         File.Move(exe, backup, overwrite: true);
         try
         {
-            File.Copy(downloadedExe, exe);
+            File.WriteAllBytes(exe, bytes);
+            if (!OperatingSystem.IsWindows())
+                File.SetUnixFileMode(exe, File.GetUnixFileMode(backup));
         }
         catch
         {
@@ -145,12 +155,20 @@ static partial class Updater
                     TryDelete(file);
     }
 
-    static bool HashMatches(string path, string? digest)
+    /// <summary>The expected SHA-256 from a "sha256:&lt;hex&gt;" digest; throws when it's missing or malformed.</summary>
+    static byte[] ExpectedHash(UpdateInfo update)
     {
-        // Older releases have no digest; the download is still over HTTPS from GitHub.
-        if (digest == null || !digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase)) return true;
+        var digest = update.Digest;
+        if (digest == null || !digest.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase) || digest.Length != 7 + 64)
+            throw new InvalidOperationException($"Release v{update.Version.ToString(3)} has no SHA-256 checksum for {AssetName}.");
+        try { return Convert.FromHexString(digest[7..]); }
+        catch (FormatException) { throw new InvalidOperationException($"Release v{update.Version.ToString(3)} has a malformed checksum for {AssetName}."); }
+    }
+
+    static bool HashMatches(string path, byte[] expected)
+    {
         using var stream = File.OpenRead(path);
-        return Convert.ToHexString(SHA256.HashData(stream)).Equals(digest[7..], StringComparison.OrdinalIgnoreCase);
+        return CryptographicOperations.FixedTimeEquals(SHA256.HashData(stream), expected);
     }
 
     /// <summary>Treats 1.2 and 1.2.0.0 as equal.</summary>

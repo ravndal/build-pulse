@@ -22,7 +22,7 @@ jobs:
         shell: pwsh
         run: |
           $version = '${{ github.ref_name }}'.TrimStart('v')
-          dotnet publish src/DevOpsWatcher.WinForms -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:Version=$version -o publish
+          dotnet publish src/DevOpsWatcher.Avalonia -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:Version=$version -o publish
 
       - name: Create GitHub release
         shell: pwsh
@@ -30,7 +30,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release create '${{ github.ref_name }}' publish/DevOpsWatcher.exe --title '${{ github.ref_name }}' --generate-notes
 
-  # The Avalonia build for macOS and Linux, one single-file executable per runtime (named as Updater.AssetName expects).
+  # macOS and Linux, one single-file executable per runtime (named as Updater.AssetName expects).
   # macOS builds run on a Mac so the SDK can ad-hoc sign the executable, which Apple silicon requires.
   cross-platform:
     needs: release

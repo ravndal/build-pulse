@@ -8,7 +8,7 @@ using Avalonia.Threading;
 
 namespace DevOpsWatcher;
 
-/// <summary>Same GitHub-dark palette and status mapping as the WinForms app.</summary>
+/// <summary>GitHub-dark palette and status mapping.</summary>
 static class Palette
 {
     public static readonly Color Green = Color.FromRgb(0x2E, 0xA0, 0x43);

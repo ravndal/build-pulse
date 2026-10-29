@@ -1,0 +1,59 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <!-- Per-user install into %LOCALAPPDATA%\Programs\BuildPulse, so no admin prompt and the app can still
+       replace its own exe when it updates itself. A newer MSI upgrades in place; settings in %APPDATA% are kept. -->
+  <Package Name="Build Pulse"
+           Manufacturer="ravndal"
+           Version="$(Version)"
+           UpgradeCode="16514c86-2a6b-444e-b777-3f18ddae2e3e"
+           Scope="perUser">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Build Pulse is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="AppIcon" SourceFile="..\assets\app.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/ravndal/build-pulse" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="BuildPulse" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <!-- Per-user components need an HKCU key path (ICE38) and must remove the folders they create (ICE64). -->
+    <Component Id="App" Directory="INSTALLFOLDER" Guid="605d11e3-9823-410f-8165-39fac9f4ffc2">
+      <File Id="BuildPulseExe" Source="$(PublishDir)BuildPulse.exe" />
+      <!-- Left behind by a self-update until the next start. -->
+      <RemoveFile Id="OldExe" Name="BuildPulse.exe.old" On="uninstall" />
+      <RemoveFolder Id="RemoveInstallFolder" On="uninstall" />
+      <RemoveFolder Id="RemoveProgramsFolder" Directory="ProgramsFolder" On="uninstall" />
+      <RegistryValue Root="HKCU" Key="Software\BuildPulse" Name="Installed" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <!-- A tray app has no window to close, so stop it if it hasn't exited shortly after being asked to. -->
+    <util:CloseApplication Id="CloseApp" Target="BuildPulse.exe" CloseMessage="yes" TerminateProcess="0" RebootPrompt="no" Timeout="5" />
+
+    <Component Id="StartMenuShortcut" Directory="ProgramMenuFolder">
+      <Shortcut Id="AppShortcut" Name="Build Pulse" Target="[#BuildPulseExe]" WorkingDirectory="INSTALLFOLDER" Icon="AppIcon" />
+      <RegistryValue Root="HKCU" Key="Software\BuildPulse" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <!-- The app writes its own start-at-login entry, so the uninstall removes it explicitly (not on upgrades). -->
+    <SetProperty Id="RemoveRunEntry" Sequence="execute" Before="RemoveRunEntry"
+                 Value="&quot;[System64Folder]reg.exe&quot; delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v BuildPulse /f" />
+    <CustomAction Id="RemoveRunEntry" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="deferred" Impersonate="yes" Return="ignore" />
+
+    <!-- Start the app after an interactive install or upgrade. -->
+    <Property Id="WixShellExecTarget" Value="[#BuildPulseExe]" />
+    <CustomAction Id="LaunchApp" BinaryRef="Wix4UtilCA_X64" DllEntry="WixShellExec" Impersonate="yes" Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="RemoveRunEntry" Before="InstallFinalize" Condition='REMOVE~="ALL" AND NOT UPGRADINGPRODUCTCODE' />
+      <Custom Action="LaunchApp" After="InstallFinalize" Condition="NOT REMOVE AND UILevel &gt;= 5" />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>

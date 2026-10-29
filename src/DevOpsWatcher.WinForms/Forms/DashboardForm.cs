@@ -654,12 +654,18 @@ sealed class DashboardForm : PopupForm
     static BuildInfo? Latest(List<BuildInfo> builds, TrackedPipeline pipeline) =>
         builds.FirstOrDefault(b => b.DefinitionId == pipeline.DefinitionId);
 
-    /// <summary>Tracked pipelines grouped by server and repo/project, in settings order.</summary>
+    /// <summary>Tracked pipelines grouped by server and repo/project, in settings order;
+    /// within a group the most recently run pipeline comes first, never-run ones last by name.</summary>
     static List<Group> Groups(DashboardModel m) =>
         m.Servers
             .SelectMany(s => s.Pipelines
                 .GroupBy(p => p.Project, StringComparer.OrdinalIgnoreCase)
-                .Select(grp => new Group(s, grp.Key, grp.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase).ToList())))
+                .Select(grp => new Group(s, grp.Key, grp
+                    .OrderByDescending(p => m.Builds
+                        .Where(b => b.ServerId == s.Id && b.DefinitionId == p.DefinitionId && b.Project.Equals(p.Project, StringComparison.OrdinalIgnoreCase))
+                        .Max(b => b.QueueTime) ?? DateTime.MinValue)
+                    .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToList())))
             .ToList();
 
     /// <summary>Draws a run's stages left to right as small status badges, dropping names that don't fit.</summary>

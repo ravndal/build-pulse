@@ -20,6 +20,9 @@ public sealed class GitHubClient : IPipelineSource
     readonly RateLimiter _limiter;
     /// <summary>Last ETag and body per GET URL. A 304 reply is free: it doesn't count against GitHub's rate limit.</summary>
     readonly Dictionary<string, (string ETag, string Body)> _etags = [];
+    /// <summary>Reset time of the quota window last logged, and whether that window's low-quota warning went out.</summary>
+    long _quotaReset;
+    bool _quotaWarned;
 
     public string ApiUrl { get; }
 
@@ -254,6 +257,7 @@ public sealed class GitHubClient : IPipelineSource
 
         using (response)
         {
+            LogQuota(response);
             if (response.StatusCode == HttpStatusCode.NotModified && cacheable && _etags.TryGetValue(url, out cached))
                 return Parse(cached.Body);
 
@@ -288,6 +292,28 @@ public sealed class GitHubClient : IPipelineSource
     }
 
     static JsonNode? Parse(string text) => string.IsNullOrWhiteSpace(text) ? null : JsonNode.Parse(text);
+
+    /// <summary>
+    /// Logs the hourly quota once per window, and again when it runs low. The quota is shared by every personal
+    /// access token of the same user, so usage already high at the first call points at another tool.
+    /// </summary>
+    void LogQuota(HttpResponseMessage response)
+    {
+        if (!long.TryParse(Header(response, "x-ratelimit-reset"), out var reset)
+            || !int.TryParse(Header(response, "x-ratelimit-limit"), out var limit)
+            || !int.TryParse(Header(response, "x-ratelimit-remaining"), out var remaining)) return;
+        bool newWindow = reset != _quotaReset;
+        bool low = remaining <= limit / 10;
+        if (!newWindow && (!low || _quotaWarned)) return;
+        if (newWindow) _quotaWarned = false;
+        _quotaReset = reset;
+        _quotaWarned |= low;
+        var resetsAt = DateTimeOffset.FromUnixTimeSeconds(reset).ToLocalTime();
+        Log.Write($"GitHub quota for {ApiUrl}: {limit - remaining}/{limit} used, resets {resetsAt:HH:mm:ss}{(low ? " (running low)" : "")}");
+    }
+
+    static string? Header(HttpResponseMessage response, string name) =>
+        response.Headers.TryGetValues(name, out var values) ? values.FirstOrDefault() : null;
 
     static TimeSpan? ResetDelay(HttpResponseMessage response)
     {

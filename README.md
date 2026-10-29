@@ -21,7 +21,7 @@ A small tray app for Windows, macOS and Linux that watches selected Azure DevOps
 
 ## Install & updates
 
-Download `BuildPulse.exe` from the [latest release](https://github.com/ravndal/devops-pipline-watcher/releases/latest) and run it from a folder you can write to (for example `%LOCALAPPDATA%\BuildPulse`). On macOS and Linux, download `BuildPulse-<runtime>` (for example `BuildPulse-osx-arm64`).
+Download `BuildPulse.exe` from the [latest release](https://github.com/ravndal/build-pulse/releases/latest) and run it from a folder you can write to (for example `%LOCALAPPDATA%\BuildPulse`). On macOS and Linux, download `BuildPulse-<runtime>` (for example `BuildPulse-osx-arm64`).
 
 Build Pulse used to be called DevOps Watcher. Updating an old install keeps its `DevOpsWatcher.exe` file name, and the first start moves its settings, log and start-at-login entry to the new names. Releases still ship `DevOpsWatcher*` copies of each executable so older versions can find the update.
 

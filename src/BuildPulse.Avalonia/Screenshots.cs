@@ -4,7 +4,7 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 /// <summary>Renders the dashboard off-screen with fixed sample data, at 2x, for docs and review.</summary>
 static class Screenshots
@@ -16,9 +16,9 @@ static class Screenshots
         var gh = model.Servers[0];
 
         Shoot(dir, "overview.png", model, v => { });
-        Shoot(dir, "overview-collapsed.png", model with { CollapsedPanels = [$"{gh.Id}|ravndal/devops-pipline-watcher"] }, v => { });
+        Shoot(dir, "overview-collapsed.png", model with { CollapsedPanels = [$"{gh.Id}|ravndal/build-pulse"] }, v => { });
         Shoot(dir, "history.png", model, v => v.ShowTab(DashboardView.Tab.History));
-        Shoot(dir, "history-filtered.png", model, v => v.ShowTab(DashboardView.Tab.History, $"{gh.Id}|ravndal/devops-pipline-watcher"));
+        Shoot(dir, "history-filtered.png", model, v => v.ShowTab(DashboardView.Tab.History, $"{gh.Id}|ravndal/build-pulse"));
 
         Shoot(dir, "approval.png", new ApprovalWindow(model.Approvals[0]));
         Shoot(dir, "toast.png", new ToastWindow(Palette.Red, "web-build: Failed", "#20261029.7 · main · Ola Nordmann", "https://example.invalid"));
@@ -77,9 +77,9 @@ static class Screenshots
             Url = ServerConfig.GitHubUrl,
             Pipelines =
             [
-                new() { Project = "ravndal/devops-pipline-watcher", DefinitionId = 1, Name = "CI" },
-                new() { Project = "ravndal/devops-pipline-watcher", DefinitionId = 2, Name = "Release" },
-                new() { Project = "ravndal/devops-pipline-watcher", DefinitionId = 3, Name = "Copilot code review" },
+                new() { Project = "ravndal/build-pulse", DefinitionId = 1, Name = "CI" },
+                new() { Project = "ravndal/build-pulse", DefinitionId = 2, Name = "Release" },
+                new() { Project = "ravndal/build-pulse", DefinitionId = 3, Name = "Copilot code review" },
             ],
         };
         var azdo = new ServerConfig
@@ -98,10 +98,10 @@ static class Screenshots
 
         var builds = new List<BuildInfo>
         {
-            Run("gh", 101, "142", "ravndal/devops-pipline-watcher", 1, "CI", "refs/heads/claude/avalonia-prototype", "ravndal", now.AddMinutes(-3), running: true),
-            Run("gh", 100, "141", "ravndal/devops-pipline-watcher", 1, "CI", "refs/pull/6/merge", "ravndal", now.AddMinutes(-52), minutes: 4),
-            Run("gh", 99, "37", "ravndal/devops-pipline-watcher", 3, "Copilot code review", "refs/pull/6/merge", "Copilot", now.AddMinutes(-50), minutes: 2),
-            Run("gh", 98, "v1.4.0", "ravndal/devops-pipline-watcher", 2, "Release", "refs/tags/v1.4.0", "ravndal", now.AddHours(-26), minutes: 6),
+            Run("gh", 101, "142", "ravndal/build-pulse", 1, "CI", "refs/heads/claude/avalonia-prototype", "ravndal", now.AddMinutes(-3), running: true),
+            Run("gh", 100, "141", "ravndal/build-pulse", 1, "CI", "refs/pull/6/merge", "ravndal", now.AddMinutes(-52), minutes: 4),
+            Run("gh", 99, "37", "ravndal/build-pulse", 3, "Copilot code review", "refs/pull/6/merge", "Copilot", now.AddMinutes(-50), minutes: 2),
+            Run("gh", 98, "v1.4.0", "ravndal/build-pulse", 2, "Release", "refs/tags/v1.4.0", "ravndal", now.AddHours(-26), minutes: 6),
             Run("az", 5012, "20261029.3", "aurum", 10, "api-deploy", "refs/heads/main", "Kristian Ravndal", now.AddMinutes(-18), running: true),
             Run("az", 5011, "20261029.7", "aurum", 11, "web-build", "refs/heads/main", "Ola Nordmann", now.AddMinutes(-35), minutes: 7, result: "failed"),
             Run("az", 5010, "20261029.1", "aurum", 12, "nightly-tests", "refs/heads/main", "Scheduled", now.AddHours(-9), minutes: 23, result: "partiallySucceeded"),
@@ -109,8 +109,8 @@ static class Screenshots
             Run("az", 5008, "20261028.2", "aurum", 10, "api-deploy", "refs/heads/main", "Kristian Ravndal", now.AddHours(-20), minutes: 14),
             Run("az", 5007, "20261028.5", "aurum", 11, "web-build", "refs/heads/main", "Ola Nordmann", now.AddHours(-22), minutes: 6),
             Run("az", 5006, "20261028.1", "aurum", 12, "nightly-tests", "refs/heads/main", "Scheduled", now.AddHours(-33), minutes: 22),
-            Run("gh", 97, "140", "ravndal/devops-pipline-watcher", 1, "CI", "refs/heads/main", "ravndal", now.AddHours(-27), minutes: 4),
-            Run("gh", 96, "139", "ravndal/devops-pipline-watcher", 1, "CI", "refs/pull/5/merge", "ravndal", now.AddHours(-30), minutes: 5, result: "failed"),
+            Run("gh", 97, "140", "ravndal/build-pulse", 1, "CI", "refs/heads/main", "ravndal", now.AddHours(-27), minutes: 4),
+            Run("gh", 96, "139", "ravndal/build-pulse", 1, "CI", "refs/pull/5/merge", "ravndal", now.AddHours(-30), minutes: 5, result: "failed"),
         }.OrderByDescending(b => b.QueueTime).ToList();
 
         var approval = new ApprovalInfo

@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/BuildPulse.Avalonia/BuildPulse.Avalonia.csproj" />
+  </Folder>
+</Solution>

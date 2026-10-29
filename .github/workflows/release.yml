@@ -22,15 +22,18 @@ jobs:
         shell: pwsh
         run: |
           $version = '${{ github.ref_name }}'.TrimStart('v')
-          dotnet publish src/DevOpsWatcher.Avalonia -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:Version=$version -o publish
+          dotnet publish src/BuildPulse.Avalonia -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:Version=$version -o publish
 
       - name: Create GitHub release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create '${{ github.ref_name }}' publish/DevOpsWatcher.exe --title '${{ github.ref_name }}' --generate-notes
+        run: |
+          Copy-Item publish/BuildPulse.exe publish/DevOpsWatcher.exe
+          gh release create '${{ github.ref_name }}' publish/BuildPulse.exe publish/DevOpsWatcher.exe --title '${{ github.ref_name }}' --generate-notes
 
   # macOS and Linux, one single-file executable per runtime (named as Updater.AssetName expects).
+  # Every asset also ships as DevOpsWatcher*, the name that pre-rename installs update from.
   # macOS builds run on a Mac so the SDK can ad-hoc sign the executable, which Apple silicon requires.
   cross-platform:
     needs: release
@@ -51,11 +54,12 @@ jobs:
       - name: Publish single-file executable
         run: |
           version="${GITHUB_REF_NAME#v}"
-          dotnet publish src/DevOpsWatcher.Avalonia -c Release -r ${{ matrix.rid }} --self-contained \
+          dotnet publish src/BuildPulse.Avalonia -c Release -r ${{ matrix.rid }} --self-contained \
             -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:Version=$version -o publish
-          mv publish/DevOpsWatcher "publish/DevOpsWatcher-${{ matrix.rid }}"
+          mv publish/BuildPulse "publish/BuildPulse-${{ matrix.rid }}"
+          cp "publish/BuildPulse-${{ matrix.rid }}" "publish/DevOpsWatcher-${{ matrix.rid }}"
 
       - name: Upload to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" "publish/DevOpsWatcher-${{ matrix.rid }}"
+        run: gh release upload "$GITHUB_REF_NAME" "publish/BuildPulse-${{ matrix.rid }}" "publish/DevOpsWatcher-${{ matrix.rid }}"

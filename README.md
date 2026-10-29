@@ -1,6 +1,8 @@
-# DevOps Watcher
+# Build Pulse
 
-<img src="assets/app.png" width="96" alt="DevOps Watcher icon">
+*One heartbeat for all your builds.*
+
+<img src="assets/app.png" width="96" alt="Build Pulse icon">
 
 A small tray app for Windows, macOS and Linux that watches selected Azure DevOps pipelines and GitHub Actions workflows, on one or more servers.
 
@@ -19,7 +21,9 @@ A small tray app for Windows, macOS and Linux that watches selected Azure DevOps
 
 ## Install & updates
 
-Download `DevOpsWatcher.exe` from the [latest release](https://github.com/ravndal/devops-pipline-watcher/releases/latest) and run it from a folder you can write to (for example `%LOCALAPPDATA%\DevOpsWatcher`).
+Download `BuildPulse.exe` from the [latest release](https://github.com/ravndal/devops-pipline-watcher/releases/latest) and run it from a folder you can write to (for example `%LOCALAPPDATA%\BuildPulse`). On macOS and Linux, download `BuildPulse-<runtime>` (for example `BuildPulse-osx-arm64`).
+
+Build Pulse used to be called DevOps Watcher. Updating an old install keeps its `DevOpsWatcher.exe` file name, and the first start moves its settings, log and start-at-login entry to the new names. Releases still ship `DevOpsWatcher*` copies of each executable so older versions can find the update.
 
 The app never updates itself on its own. The dashboard footer (and the tray menu) has a **Check for updates** button; the app also looks quietly 30 seconds after start and then every 6 hours. When a newer release is found the button changes to **Update to vX.Y.Z**, and only clicking it downloads the new exe, checks its SHA-256 against the release, and restarts into it.
 
@@ -38,17 +42,17 @@ The Release workflow publishes the single-file exe with that version and creates
 Requires the .NET 10 SDK.
 
 ```bash
-dotnet build src/DevOpsWatcher.Avalonia -c Release
+dotnet build src/BuildPulse.Avalonia -c Release
 ```
 
 ```bash
-src/DevOpsWatcher.Avalonia/bin/Release/net10.0/DevOpsWatcher.exe
+src/BuildPulse.Avalonia/bin/Release/net10.0/BuildPulse.exe
 ```
 
 To get a single self-contained exe:
 
 ```bash
-dotnet publish src/DevOpsWatcher.Avalonia -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
+dotnet publish src/BuildPulse.Avalonia -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
 ```
 
 Use another runtime (`osx-arm64`, `osx-x64`, `linux-x64`) for macOS or Linux.
@@ -61,7 +65,7 @@ Use another runtime (`osx-arm64`, `osx-x64`, `linux-x64`) for macOS or Linux.
 | `src/Shared/Sources` | Azure DevOps and GitHub API clients, demo source, rate limiter |
 | `src/Shared/Services` | Polling, self-update, run at startup, secret storage |
 | `src/Shared/Infrastructure` | JSON, logging and formatting helpers |
-| `src/DevOpsWatcher.Avalonia` | The tray app (Avalonia UI) |
+| `src/BuildPulse.Avalonia` | The tray app (Avalonia UI) |
 | `src/tools` | `make-icon.cs`, which regenerates `assets/app.ico` and `assets/app.png` |
 
 Run with `--demo` to try the UI with fake pipelines and no server. A deployment asks for approval about 45 seconds after start.
@@ -87,7 +91,7 @@ On first run Settings opens with **Add server**. Add as many servers as you like
 1. Use a fine-grained token with repository permissions *Actions (Read)* and *Deployments (Read & write)*, or a classic token with the `repo` scope. Approving needs the write permission and that you're a required reviewer on the environment.
 2. Click **Connect**, expand repositories, and tick the workflows you want to track.
 
-Settings are saved in `%APPDATA%\DevOpsWatcher\settings.json`. Tokens are encrypted with Windows DPAPI for your user. Settings from older versions (one Azure DevOps server) are moved into the server list on first start.
+Settings are saved in `%APPDATA%\BuildPulse\settings.json`. Tokens are encrypted with Windows DPAPI for your user. Settings from older versions (one Azure DevOps server) are moved into the server list on first start.
 
 ## Notes
 
@@ -109,6 +113,6 @@ Settings are saved in `%APPDATA%\DevOpsWatcher\settings.json`. Tokens are encryp
     "MaxWaitSeconds": 30
   }
   ```
-- Diagnostics are written to `%APPDATA%\DevOpsWatcher\log.txt` (no secrets).
+- Diagnostics are written to `%APPDATA%\BuildPulse\log.txt` (no secrets).
 - To approve, you must be one of the run's approvers. If you're not, the error shows in the popup.
 - If the token can't read approvals, the app still detects waiting runs from the build timeline. You then approve from the browser.

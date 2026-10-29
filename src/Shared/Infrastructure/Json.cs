@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Text.Json.Nodes;
 
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 /// <summary>Raised by pipeline sources; <see cref="StatusCode"/> is the HTTP status, or 0 for network errors.</summary>
 public sealed class PipelineException(int statusCode, string message) : Exception(message)

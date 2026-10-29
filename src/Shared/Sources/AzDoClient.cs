@@ -2,9 +2,9 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json.Nodes;
-using static DevOpsWatcher.Json;
+using static BuildPulse.Json;
 
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 /// <summary>
 /// Minimal Azure DevOps REST client. Works against dev.azure.com and Azure DevOps Server

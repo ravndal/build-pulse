@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 public sealed class TrackedPipeline
 {
@@ -121,8 +121,7 @@ public sealed class AppSettings
     [JsonIgnore]
     public bool IsConfigured => Servers.Any(s => s.Url != "" && s.HasCredentials && s.Pipelines.Count > 0);
 
-    static string FilePath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "DevOpsWatcher", "settings.json");
+    static string FilePath => Path.Combine(AppInfo.DataDir, "settings.json");
 
     public static AppSettings Load()
     {

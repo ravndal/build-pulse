@@ -1,17 +1,21 @@
 using System.Security;
 using Microsoft.Win32;
 
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 /// <summary>Start at login: the HKCU Run key on Windows, a LaunchAgent on macOS.</summary>
 static class Startup
 {
     const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
-    const string ValueName = "DevOpsWatcher";
-    const string AgentLabel = "no.ravndal.devopswatcher";
+    const string ValueName = AppInfo.Id;
+    const string LegacyValueName = AppInfo.LegacyId;
+    const string AgentLabel = "no.ravndal.buildpulse";
+    const string LegacyAgentLabel = "no.ravndal.devopswatcher";
 
-    static string AgentPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "LaunchAgents", AgentLabel + ".plist");
+    static string AgentPath => AgentPathFor(AgentLabel);
+
+    static string AgentPathFor(string label) => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "LaunchAgents", label + ".plist");
 
     public static bool IsSupported => OperatingSystem.IsWindows() || OperatingSystem.IsMacOS();
 
@@ -51,6 +55,25 @@ static class Startup
                 </dict>
                 </plist>
                 """);
+        }
+    }
+
+    /// <summary>Replaces a DevOpsWatcher start-at-login entry with one under the new name, pointing at this exe.</summary>
+    public static void MigrateLegacy()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(RunKey, writable: true);
+            if (key?.GetValue(LegacyValueName) == null) return;
+            key.DeleteValue(LegacyValueName, throwOnMissingValue: false);
+            Set(true);
+        }
+        else if (OperatingSystem.IsMacOS())
+        {
+            var legacy = AgentPathFor(LegacyAgentLabel);
+            if (!File.Exists(legacy)) return;
+            File.Delete(legacy);
+            Set(true);
         }
     }
 }

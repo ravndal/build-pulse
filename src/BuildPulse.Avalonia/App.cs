@@ -6,7 +6,7 @@ using Avalonia.Styling;
 using Avalonia.Themes.Fluent;
 using Avalonia.Threading;
 
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 /// <summary>Tray / menu-bar icon with a menu, the dashboard flyout next to it, popups, settings and self-update.</summary>
 sealed class App : Application
@@ -34,7 +34,7 @@ sealed class App : Application
 
     public override void Initialize()
     {
-        Name = "DevOps Watcher";
+        Name = AppInfo.Name;
         RequestedThemeVariant = ThemeVariant.Dark;
         Styles.Add(new FluentTheme());
     }
@@ -57,7 +57,7 @@ sealed class App : Application
 
         _flyout = new Window
         {
-            Title = "DevOps Watcher",
+            Title = AppInfo.Name,
             WindowDecorations = WindowDecorations.None,
             SizeToContent = SizeToContent.WidthAndHeight,
             ShowInTaskbar = false,
@@ -103,7 +103,7 @@ sealed class App : Application
         menu.Add(Item("Quit", () => desktop.Shutdown()));
         menu.Opening += (_, _) => _muteItem.IsChecked = !_watcher.Settings.ShowStatusPopups;
 
-        _tray = new TrayIcon { Menu = menu, ToolTipText = "DevOps Watcher", IsVisible = true };
+        _tray = new TrayIcon { Menu = menu, ToolTipText = AppInfo.Name, IsVisible = true };
         _tray.Clicked += (_, _) => ToggleFlyout();
         TrayIcon.SetIcons(this, [_tray]);
 
@@ -115,7 +115,7 @@ sealed class App : Application
         StartUpdater();
         _watcher.Apply(_watcher.Settings);
         if (OpenSettings || !_watcher.Settings.IsConfigured) ShowSettings();
-        if (Updated) Toast(Palette.Green, $"Updated to v{Updater.CurrentVersion.ToString(3)}", "DevOps Watcher is up to date.", null);
+        if (Updated) Toast(Palette.Green, $"Updated to v{Updater.CurrentVersion.ToString(3)}", $"{AppInfo.Name} is up to date.", null);
     }
 
     static NativeMenuItem Item(string header, Action onClick)

@@ -1,4 +1,4 @@
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 /// <summary>What one server returned in one poll.</summary>
 sealed record ServerPoll(

@@ -1,4 +1,4 @@
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 /// <summary>
 /// In-memory fake used by <c>--demo</c>: a CI build finishing, a deployment that stops for approval,

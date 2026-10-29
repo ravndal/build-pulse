@@ -9,7 +9,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Styling;
 
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 public sealed record DashboardModel(
     IReadOnlyList<ServerConfig> Servers,
@@ -133,7 +133,7 @@ sealed class DashboardView : UserControl
     Control Header(DashboardModel m)
     {
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Height = 60, Margin = new Thickness(16, 0) };
-        using (var png = AssetLoader.Open(new Uri("avares://DevOpsWatcher/Assets/app.png")))
+        using (var png = AssetLoader.Open(new Uri("avares://BuildPulse/Assets/app.png")))
             grid.Children.Add(new Image { Source = new Bitmap(png), Width = 36, Height = 36, VerticalAlignment = VerticalAlignment.Center });
         var titles = new StackPanel { Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center, Spacing = 1 };
         titles.Children.Add(Label("Pipelines", 16, Palette.Text, FontWeight.SemiBold));

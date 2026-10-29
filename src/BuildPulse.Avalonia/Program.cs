@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Headless;
 
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 static class Program
 {
@@ -10,9 +10,9 @@ static class Program
     static int Main(string[] args)
     {
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Write($"Fatal: {e.ExceptionObject}");
-        // One self-contained executable per runtime in the GitHub release, e.g. DevOpsWatcher-osx-arm64.
-        // Windows keeps the default DevOpsWatcher.exe, the name older installs update from.
-        if (!OperatingSystem.IsWindows()) Updater.AssetName = $"DevOpsWatcher-{RuntimeInformation.RuntimeIdentifier}";
+        // One self-contained executable per runtime in the GitHub release, e.g. BuildPulse-osx-arm64; Windows keeps
+        // the default BuildPulse.exe. Releases also carry DevOpsWatcher* copies, the names older installs update from.
+        if (!OperatingSystem.IsWindows()) Updater.AssetName = $"{AppInfo.Id}-{RuntimeInformation.RuntimeIdentifier}";
 
         int shots = Array.FindIndex(args, a => a.Equals("--screenshots", StringComparison.OrdinalIgnoreCase));
         if (shots >= 0)
@@ -28,9 +28,12 @@ static class Program
         }
 
         bool updated = Has(args, Updater.UpdatedArg);
-        using var mutex = new Mutex(true, "DevOpsWatcher.SingleInstance", out bool isFirstInstance);
-        // Right after a self-update the old process may still be shutting down.
-        if (!isFirstInstance && !(updated && WaitForMutex(mutex))) return 0;
+        // Right after a self-update the old process may still be shutting down. The DevOpsWatcher name is held too,
+        // so a pre-rename version can't run beside this one and an update from it waits until it has exited.
+        using var mutex = Acquire(AppInfo.Id + ".SingleInstance", updated);
+        using var legacyMutex = mutex == null ? null : Acquire(AppInfo.LegacyId + ".SingleInstance", updated);
+        if (legacyMutex == null) return 0;
+        AppInfo.MigrateLegacy();
 
         App.Demo = Has(args, "--demo");
         App.OpenSettings = Has(args, "--settings");
@@ -43,6 +46,15 @@ static class Program
     }
 
     static bool Has(string[] args, string flag) => args.Any(a => a.Equals(flag, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>The named mutex when this process got it, else null; waits for it only when <paramref name="wait"/> is set.</summary>
+    static Mutex? Acquire(string name, bool wait)
+    {
+        var mutex = new Mutex(true, name, out bool isFirstInstance);
+        if (isFirstInstance || (wait && WaitForMutex(mutex))) return mutex;
+        mutex.Dispose();
+        return null;
+    }
 
     static bool WaitForMutex(Mutex mutex)
     {

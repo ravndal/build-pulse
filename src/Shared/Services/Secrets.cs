@@ -2,7 +2,7 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 /// <summary>Keeps PATs out of settings.json: DPAPI-encrypted on Windows, stored in the login Keychain on macOS.</summary>
 static class Secrets
@@ -80,7 +80,7 @@ static class Dpapi
         {
             Marshal.Copy(input, 0, dataIn.pbData, input.Length);
             bool ok = protect
-                ? CryptProtectData(ref dataIn, "DevOpsWatcher", 0, 0, 0, UiForbidden, ref dataOut)
+                ? CryptProtectData(ref dataIn, AppInfo.Id, 0, 0, 0, UiForbidden, ref dataOut)
                 : CryptUnprotectData(ref dataIn, 0, 0, 0, 0, UiForbidden, ref dataOut);
             if (!ok) throw new Win32Exception(Marshal.GetLastWin32Error());
             var result = new byte[dataOut.cbData];
@@ -97,12 +97,14 @@ static class Dpapi
 
 /// <summary>
 /// macOS login Keychain via Security.framework's generic-password calls. settings.json only holds
-/// "keychain:&lt;account&gt;"; the token itself stays in the Keychain under the "DevOpsWatcher" service.
+/// "keychain:&lt;account&gt;"; the token itself stays in the Keychain under the "BuildPulse" service, or the
+/// "DevOpsWatcher" one for tokens saved before the rename.
 /// </summary>
 static class Keychain
 {
     public const string Prefix = "keychain:";
-    const string Service = "DevOpsWatcher";
+    const string Service = AppInfo.Id;
+    static readonly string[] LookupServices = [Service, AppInfo.LegacyId];
     const string Security = "/System/Library/Frameworks/Security.framework/Security";
     const int ErrSecItemNotFound = -25300;
 
@@ -139,30 +141,39 @@ static class Keychain
 
     public static string? Find(string account)
     {
-        byte[] s = Encoding.UTF8.GetBytes(Service), a = Encoding.UTF8.GetBytes(account);
-        int status = SecKeychainFindGenericPassword(0, (uint)s.Length, s, (uint)a.Length, a, out var length, out var data, 0);
-        if (status == ErrSecItemNotFound) return null;
-        if (status != 0) { Log.Write($"Keychain lookup failed (OSStatus {status})"); return null; }
-        try
+        byte[] a = Encoding.UTF8.GetBytes(account);
+        foreach (var service in LookupServices)
         {
-            var bytes = new byte[length];
-            Marshal.Copy(data, bytes, 0, (int)length);
-            return Encoding.UTF8.GetString(bytes);
+            byte[] s = Encoding.UTF8.GetBytes(service);
+            int status = SecKeychainFindGenericPassword(0, (uint)s.Length, s, (uint)a.Length, a, out var length, out var data, 0);
+            if (status == ErrSecItemNotFound) continue;
+            if (status != 0) { Log.Write($"Keychain lookup failed (OSStatus {status})"); return null; }
+            try
+            {
+                var bytes = new byte[length];
+                Marshal.Copy(data, bytes, 0, (int)length);
+                return Encoding.UTF8.GetString(bytes);
+            }
+            finally { SecKeychainItemFreeContent(0, data); }
         }
-        finally { SecKeychainItemFreeContent(0, data); }
+        return null;
     }
 
     public static void Delete(string account)
     {
-        byte[] s = Encoding.UTF8.GetBytes(Service), a = Encoding.UTF8.GetBytes(account);
-        int status = SecKeychainFindGenericPasswordItem(0, (uint)s.Length, s, (uint)a.Length, a, 0, 0, out var item);
-        if (status == ErrSecItemNotFound) return;
-        if (status != 0) throw new InvalidOperationException($"OSStatus {status}");
-        try
+        byte[] a = Encoding.UTF8.GetBytes(account);
+        foreach (var service in LookupServices)
         {
-            status = SecKeychainItemDelete(item);
+            byte[] s = Encoding.UTF8.GetBytes(service);
+            int status = SecKeychainFindGenericPasswordItem(0, (uint)s.Length, s, (uint)a.Length, a, 0, 0, out var item);
+            if (status == ErrSecItemNotFound) continue;
             if (status != 0) throw new InvalidOperationException($"OSStatus {status}");
+            try
+            {
+                status = SecKeychainItemDelete(item);
+                if (status != 0) throw new InvalidOperationException($"OSStatus {status}");
+            }
+            finally { CFRelease(item); }
         }
-        finally { CFRelease(item); }
     }
 }

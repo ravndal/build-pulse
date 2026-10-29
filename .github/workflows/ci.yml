@@ -16,15 +16,15 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Build
-        run: dotnet build src/DevOpsWatcher.Avalonia -c Release
+        run: dotnet build src/BuildPulse.Avalonia -c Release
 
       - name: Publish single-file exe
-        run: dotnet publish src/DevOpsWatcher.Avalonia -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
+        run: dotnet publish src/BuildPulse.Avalonia -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
 
       - uses: actions/upload-artifact@v4
         with:
-          name: DevOpsWatcher-${{ github.sha }}
-          path: publish/DevOpsWatcher.exe
+          name: BuildPulse-${{ github.sha }}
+          path: publish/BuildPulse.exe
 
   # Trimming can drop code that is only reached at runtime, so render every window from the trimmed
   # macOS and Linux executables (off-screen, no tray or network) as a smoke test.
@@ -43,9 +43,9 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Publish trimmed single-file executable
-        run: dotnet publish src/DevOpsWatcher.Avalonia -c Release -r ${{ matrix.rid }} --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
+        run: dotnet publish src/BuildPulse.Avalonia -c Release -r ${{ matrix.rid }} --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
 
       - name: Render screenshots
         run: |
-          publish/DevOpsWatcher --screenshots shots
+          publish/BuildPulse --screenshots shots
           test "$(ls shots/*.png | wc -l)" -eq 10

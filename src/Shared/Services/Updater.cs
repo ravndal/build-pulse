@@ -5,7 +5,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 /// <summary>A newer release found on GitHub; nothing is downloaded until the user asks for it.</summary>
 sealed record UpdateInfo(Version Version, string ReleaseUrl, string DownloadUrl, string? Digest);
@@ -36,17 +36,17 @@ static partial class Updater
     const string Repo = "ravndal/devops-pipline-watcher";
     public const string UpdatedArg = "--updated";
 
-    /// <summary>The release asset this build updates from: DevOpsWatcher.exe on Windows, one executable per runtime elsewhere.</summary>
-    public static string AssetName { get; set; } = "DevOpsWatcher.exe";
+    /// <summary>The release asset this build updates from: BuildPulse.exe on Windows, one executable per runtime elsewhere.</summary>
+    public static string AssetName { get; set; } = AppInfo.Id + ".exe";
 
     static readonly string DownloadDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DevOpsWatcher", "update");
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), AppInfo.Id, "update");
 
     public static Version CurrentVersion { get; } = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0);
 
     /// <summary>Only the single-file release exe can replace itself; a dotnet build output can't.</summary>
     public static bool IsSupported =>
-        Environment.ProcessPath != null && !File.Exists(Path.Combine(AppContext.BaseDirectory, "DevOpsWatcher.dll"));
+        Environment.ProcessPath != null && !File.Exists(Path.Combine(AppContext.BaseDirectory, AppInfo.Id + ".dll"));
 
     sealed class Release
     {
@@ -71,7 +71,7 @@ static partial class Updater
     static HttpClient CreateHttp()
     {
         var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
-        http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("DevOpsWatcher", CurrentVersion.ToString()));
+        http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue(AppInfo.Id, CurrentVersion.ToString()));
         http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         return http;
     }
@@ -97,7 +97,7 @@ static partial class Updater
         var expected = ExpectedHash(update);
         using var http = CreateHttp();
         Directory.CreateDirectory(DownloadDir);
-        var target = Path.Combine(DownloadDir, $"DevOpsWatcher-{update.Version}.download");
+        var target = Path.Combine(DownloadDir, $"{AppInfo.Id}-{update.Version}.download");
         if (!File.Exists(target) || !HashMatches(target, expected))
         {
             var partial = target + ".part";
@@ -150,7 +150,7 @@ static partial class Updater
         if (Environment.ProcessPath is { } exe) TryDelete(exe + ".old");
         if (Directory.Exists(DownloadDir))
             foreach (var file in Directory.EnumerateFiles(DownloadDir))
-                if (!Version.TryParse(Path.GetFileNameWithoutExtension(file).Replace("DevOpsWatcher-", ""), out var v)
+                if (!Version.TryParse(Path.GetFileNameWithoutExtension(file).Replace(AppInfo.Id + "-", ""), out var v)
                     || Normalize(v) <= Normalize(CurrentVersion))
                     TryDelete(file);
     }

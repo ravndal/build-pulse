@@ -1,10 +1,9 @@
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
-/// <summary>Small rolling diagnostic log in %APPDATA%\DevOpsWatcher\log.txt. Never logs credentials.</summary>
+/// <summary>Small rolling diagnostic log in %APPDATA%\BuildPulse\log.txt. Never logs credentials.</summary>
 static class Log
 {
-    static readonly string FilePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "DevOpsWatcher", "log.txt");
+    static readonly string FilePath = Path.Combine(AppInfo.DataDir, "log.txt");
 
     public static void Write(string message)
     {

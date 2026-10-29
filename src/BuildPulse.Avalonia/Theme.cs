@@ -6,7 +6,7 @@ using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 /// <summary>GitHub-dark palette and status mapping.</summary>
 static class Palette

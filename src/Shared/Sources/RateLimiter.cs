@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 /// <summary>
 /// Client-side throttling of Azure DevOps calls: one budget for the signed-in user across all endpoints,

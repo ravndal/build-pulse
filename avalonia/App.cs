@@ -24,6 +24,7 @@ sealed class App : Application
     Watcher? _watcher;
     TrayIcon? _tray;
     Window? _flyout;
+    DateTime _flyoutShownAt;
     DashboardView? _dashboard;
     SettingsWindow? _settingsWindow;
     NativeMenuItem? _muteItem, _updateItem;
@@ -66,7 +67,11 @@ sealed class App : Application
             TransparencyLevelHint = [WindowTransparencyLevel.Transparent],
             Content = _dashboard,
         };
-        _flyout.Deactivated += (_, _) => _flyout.Hide();
+        // On macOS the window can lose focus right as it opens (the tray menu is still closing), so ignore that.
+        _flyout.Deactivated += (_, _) =>
+        {
+            if (DateTime.UtcNow - _flyoutShownAt > TimeSpan.FromMilliseconds(500)) _flyout.Hide();
+        };
 
         _muteItem = new NativeMenuItem("Mute status popups") { ToggleType = MenuItemToggleType.CheckBox };
         _muteItem.Click += (_, _) => _watcher.SetStatusPopups(!_watcher.Settings.ShowStatusPopups);
@@ -96,7 +101,7 @@ sealed class App : Application
         menu.Add(Item("Quit", () => desktop.Shutdown()));
         menu.Opening += (_, _) => _muteItem.IsChecked = !_watcher.Settings.ShowStatusPopups;
 
-        _tray = new TrayIcon { Menu = menu, IsVisible = true };
+        _tray = new TrayIcon { Menu = menu, ToolTipText = "DevOps Watcher", IsVisible = true };
         _tray.Clicked += (_, _) => ToggleFlyout();
         TrayIcon.SetIcons(this, [_tray]);
 
@@ -284,9 +289,14 @@ sealed class App : Application
     {
         if (_flyout!.IsVisible) { _flyout.Hide(); return; }
         _dashboard!.ShowTab(DashboardView.Tab.Overview);
-        PlaceFlyout();
-        _flyout.Show();
-        _flyout.Activate();
+        // Let the tray menu finish closing before the window takes focus.
+        Dispatcher.UIThread.Post(() =>
+        {
+            PlaceFlyout();
+            _flyoutShownAt = DateTime.UtcNow;
+            _flyout.Show();
+            _flyout.Activate();
+        });
     }
 
     /// <summary>Below the menu bar on macOS, above the taskbar elsewhere; right-aligned either way.</summary>
@@ -297,8 +307,9 @@ sealed class App : Application
         var area = screen.WorkingArea;
         double scale = screen.Scaling;
         _dashboard!.MaxContentHeight = area.Height / scale * 0.7;
-        _flyout.Measure(Size.Infinity);
-        var size = PixelSize.FromSize(_flyout.DesiredSize, scale);
+        // Measure the content, not the window: once shown and hidden, the window measures as 0×0.
+        _dashboard.Measure(Size.Infinity);
+        var size = PixelSize.FromSize(_dashboard.DesiredSize, scale);
         int margin = (int)(8 * scale);
         int x = area.Right - size.Width - margin;
         int y = OperatingSystem.IsMacOS() ? area.Y + margin : area.Bottom - size.Height - margin;

@@ -24,13 +24,20 @@ jobs:
           $version = '${{ github.ref_name }}'.TrimStart('v')
           dotnet publish src/BuildPulse.Avalonia -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:Version=$version -o publish
 
+      - name: Build MSI installer
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          dotnet build installer -c Release -p:Version=$version -p:PublishDir=../publish/
+          Copy-Item installer/bin/Release/BuildPulse.msi publish/BuildPulse.msi
+
       - name: Create GitHub release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           Copy-Item publish/BuildPulse.exe publish/DevOpsWatcher.exe
-          gh release create '${{ github.ref_name }}' publish/BuildPulse.exe publish/DevOpsWatcher.exe --title '${{ github.ref_name }}' --generate-notes
+          gh release create '${{ github.ref_name }}' publish/BuildPulse.msi publish/BuildPulse.exe publish/DevOpsWatcher.exe --title '${{ github.ref_name }}' --generate-notes
 
   # macOS and Linux, one single-file executable per runtime (named as Updater.AssetName expects).
   # Every asset also ships as DevOpsWatcher*, the name that pre-rename installs update from.

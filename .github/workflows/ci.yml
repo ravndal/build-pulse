@@ -21,10 +21,15 @@ jobs:
       - name: Publish single-file exe
         run: dotnet publish src/BuildPulse.Avalonia -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
 
+      - name: Build MSI installer
+        run: dotnet build installer -c Release -p:PublishDir=../publish/
+
       - uses: actions/upload-artifact@v4
         with:
           name: BuildPulse-${{ github.sha }}
-          path: publish/BuildPulse.exe
+          path: |
+            publish/BuildPulse.exe
+            installer/bin/Release/BuildPulse.msi
 
   # Trimming can drop code that is only reached at runtime, so render every window from the trimmed
   # macOS and Linux executables (off-screen, no tray or network) as a smoke test.

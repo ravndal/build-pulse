@@ -1,0 +1,19 @@
+<Project Sdk="WixToolset.Sdk/6.0.2">
+
+  <!-- Per-user MSI around the published single-file exe. Windows only.
+       Publish the exe first, then: dotnet build installer -c Release -p:Version=1.2.0 -p:PublishDir=..\publish\ -->
+  <PropertyGroup>
+    <OutputName>BuildPulse</OutputName>
+    <Version Condition="'$(Version)' == ''">1.0.0</Version>
+    <PublishDir Condition="'$(PublishDir)' == ''">..\publish\</PublishDir>
+    <DefineConstants>Version=$(Version);PublishDir=$(PublishDir)</DefineConstants>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <!-- ICE91: per-user only by design. ICE69: the shortcut targets the exe in another component of the same feature. -->
+    <SuppressIces>ICE91;ICE69</SuppressIces>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Util.wixext" Version="6.0.2" />
+  </ItemGroup>
+
+</Project>

@@ -64,6 +64,8 @@ chmod +x BuildPulse-linux-x64
 
 The tray icon needs a desktop with a system tray (StatusNotifierItem / AppIndicator).
 
+**Known limitation:** Linux has no token store yet, so saving a server with a PAT or token fails there. `--demo` works.
+
 ### Updates
 
 The app never updates itself on its own. The dashboard footer (and the tray menu) has a **Check for updates** button; the app also looks quietly 30 seconds after start and then every 6 hours. When a newer release is found the button changes to **Update to vX.Y.Z**, and only clicking it downloads the new executable, checks its SHA-256 against the release, and restarts into it. This works the same for MSI installs.

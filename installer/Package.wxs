@@ -34,13 +34,17 @@
       <RegistryValue Root="HKCU" Key="Software\BuildPulse" Name="Installed" Type="integer" Value="1" KeyPath="yes" />
     </Component>
 
-    <!-- A tray app has no window to close, so stop it if it hasn't exited shortly after being asked to. -->
-    <util:CloseApplication Id="CloseApp" Target="BuildPulse.exe" CloseMessage="yes" TerminateProcess="0" RebootPrompt="no" Timeout="5" />
-
     <Component Id="StartMenuShortcut" Directory="ProgramMenuFolder">
       <Shortcut Id="AppShortcut" Name="Build Pulse" Target="[#BuildPulseExe]" WorkingDirectory="INSTALLFOLDER" Icon="AppIcon" />
       <RegistryValue Root="HKCU" Key="Software\BuildPulse" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
     </Component>
+
+    <!-- Stop the installed copy before InstallValidate, where Windows Installer would otherwise prompt about the exe
+         being in use (util:CloseApplication only runs after that). A tray app has no window to close, and its
+         settings are saved as they change, so it's stopped outright. Copies elsewhere (portable, dev builds) are left alone. -->
+    <SetProperty Id="WixQuietExecCmdLine" Sequence="execute" Before="StopApp"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -Command &quot;ps BuildPulse -EA 0 | ? Path -eq '[INSTALLFOLDER]BuildPulse.exe' | kill -Force -PassThru | Wait-Process&quot;" />
+    <CustomAction Id="StopApp" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec" Execute="immediate" Return="ignore" />
 
     <!-- The app writes its own start-at-login entry, so the uninstall removes it explicitly (not on upgrades). -->
     <SetProperty Id="RemoveRunEntry" Sequence="execute" Before="RemoveRunEntry"
@@ -52,6 +56,7 @@
     <CustomAction Id="LaunchApp" BinaryRef="Wix4UtilCA_X64" DllEntry="WixShellExec" Impersonate="yes" Return="ignore" />
 
     <InstallExecuteSequence>
+      <Custom Action="StopApp" Before="InstallValidate" />
       <Custom Action="RemoveRunEntry" Before="InstallFinalize" Condition='REMOVE~="ALL" AND NOT UPGRADINGPRODUCTCODE' />
       <Custom Action="LaunchApp" After="InstallFinalize" Condition="NOT REMOVE AND UILevel &gt;= 5" />
     </InstallExecuteSequence>

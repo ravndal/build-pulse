@@ -322,8 +322,7 @@ sealed partial class ServerWindow : Window
             {
                 if (pat != _storedPatText)
                 {
-                    var stored = Secrets.Protect(pat);
-                    Secrets.Delete(_storedPat);
+                    var stored = Secrets.Protect(pat, _storedPat);
                     (_storedPat, _storedPatText) = (stored, pat);
                 }
                 server.ProtectedPat = _storedPat;

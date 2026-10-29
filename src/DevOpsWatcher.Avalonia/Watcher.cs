@@ -6,7 +6,6 @@ namespace DevOpsWatcher;
 /// <summary>
 /// Polls every configured server through <see cref="Poller"/>, merges the results and reports what changed:
 /// the dashboard model, status toasts for builds that start, move stage or finish, and the pending approvals.
-/// Same logic as the WinForms <c>TrayApp</c>, without any UI.
 /// </summary>
 sealed class Watcher : IDisposable
 {

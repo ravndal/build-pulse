@@ -2,9 +2,9 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json.Nodes;
-using static DevOpsWatcher.Json;
+using static BuildPulse.Json;
 
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 /// <summary>
 /// Minimal GitHub Actions REST client for github.com, GitHub Enterprise Cloud (*.ghe.com) and GitHub Enterprise Server.
@@ -30,7 +30,7 @@ public sealed class GitHubClient : IPipelineSource
         _http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
         _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
         _http.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
-        _http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("DevOpsWatcher", (typeof(GitHubClient).Assembly.GetName().Version ?? new Version(0, 0)).ToString(3)));
+        _http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue(AppInfo.Id, (typeof(GitHubClient).Assembly.GetName().Version ?? new Version(0, 0)).ToString(3)));
         if (!string.IsNullOrEmpty(token))
             _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
     }

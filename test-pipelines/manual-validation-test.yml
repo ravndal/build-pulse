@@ -1,4 +1,4 @@
-# Throwaway pipeline for testing DevOps Watcher's experimental Resume/Reject of Manual validation steps.
+# Throwaway pipeline for testing Build Pulse's experimental Resume/Reject of Manual validation steps.
 # It deploys nothing. Create it in a sandbox project (Pipelines > New pipeline > Existing YAML file),
 # then add it to the watcher and run it manually.
 trigger: none
@@ -26,7 +26,7 @@ stages:
             inputs:
               notifyUsers: ''
               approvers: 'REPLACE_WITH_YOUR_EMAIL'
-              instructions: 'DevOps Watcher test 1: Resume this from the popup.'
+              instructions: 'Build Pulse test 1: Resume this from the popup.'
               onTimeout: reject
 
   # Test 2: someone else is the only approver. Resume from the popup MUST fail;
@@ -43,7 +43,7 @@ stages:
             inputs:
               notifyUsers: ''
               approvers: 'REPLACE_WITH_A_COLLEAGUES_EMAIL'
-              instructions: 'DevOps Watcher test 2: Resume from the popup should be refused.'
+              instructions: 'Build Pulse test 2: Resume from the popup should be refused.'
               onTimeout: reject
 
   - stage: Done

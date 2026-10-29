@@ -1,4 +1,4 @@
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 public sealed record ProjectInfo(string Id, string Name);
 

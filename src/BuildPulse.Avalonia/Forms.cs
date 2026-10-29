@@ -3,7 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 /// <summary>Two-column "caption | control" layout shared by the settings windows.</summary>
 sealed class FormGrid : Grid
@@ -91,7 +91,7 @@ static class Dialogs
 {
     public static Task<bool> ConfirmAsync(Window owner, string title, string message, string ok = "OK") => ShowAsync(owner, title, message, ok, cancel: true);
 
-    public static Task ErrorAsync(Window owner, string message) => ShowAsync(owner, "DevOps Watcher", message, "OK", cancel: false);
+    public static Task ErrorAsync(Window owner, string message) => ShowAsync(owner, AppInfo.Name, message, "OK", cancel: false);
 
     static Task<bool> ShowAsync(Window owner, string title, string message, string ok, bool cancel)
     {

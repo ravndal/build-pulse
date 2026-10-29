@@ -6,7 +6,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 /// <summary>
 /// Adds or edits one server. Adding starts with a choice of target (Azure DevOps, Azure DevOps Server, GitHub,

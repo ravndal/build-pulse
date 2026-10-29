@@ -3,7 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 /// <summary>The servers to watch plus general options. Raises <see cref="Saved"/> with the new settings.</summary>
 sealed class SettingsWindow : Window
@@ -45,7 +45,7 @@ sealed class SettingsWindow : Window
             foreach (var pat in _seenPats.Except(kept)) Secrets.Delete(pat);
         };
 
-        Title = "DevOps Watcher – Settings";
+        Title = AppInfo.Name + " – Settings";
         Width = 620;
         Height = 480;
         MinWidth = 500;

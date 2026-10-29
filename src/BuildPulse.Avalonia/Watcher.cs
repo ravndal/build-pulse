@@ -1,7 +1,7 @@
 using Avalonia.Media;
 using Avalonia.Threading;
 
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 /// <summary>
 /// Polls every configured server through <see cref="Poller"/>, merges the results and reports what changed:
@@ -258,7 +258,7 @@ sealed class Watcher : IDisposable
             TrayState.Running => $"{_builds.Count(b => b.IsActive)} running",
             _ => FailureDot ? "Idle · last run failed" : "All quiet",
         };
-        text = "DevOps Watcher – " + text;
+        text = AppInfo.Name + " – " + text;
         return text.Length > 127 ? text[..124] + "…" : text;
     }
 

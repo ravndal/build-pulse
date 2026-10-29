@@ -5,7 +5,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
 
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 /// <summary>Borderless, top-most, dark, rounded window used for toasts and approvals.</summary>
 class PopupWindow : Window

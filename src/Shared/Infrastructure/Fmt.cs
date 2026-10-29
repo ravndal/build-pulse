@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 public enum TrayState { Unconfigured, Idle, Running, Approval, Error }
 

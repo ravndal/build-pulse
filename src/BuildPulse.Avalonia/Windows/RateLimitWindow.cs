@@ -2,7 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 
-namespace DevOpsWatcher;
+namespace BuildPulse;
 
 /// <summary>Edits <see cref="RateLimitSettings"/>: the per-user budget and one budget per endpoint. Closes with the result, or null.</summary>
 sealed class RateLimitWindow : Window

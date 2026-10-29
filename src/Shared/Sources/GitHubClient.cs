@@ -259,6 +259,8 @@ public sealed class GitHubClient : IPipelineSource
                 response.Dispose();
                 if (_redirectsLogged.Add(RepoOf(relativeUrl)))
                     Log.Write($"GitHub redirected {RepoOf(relativeUrl)}: the repo was probably renamed. Re-add it under its new name.");
+                // Each hop is a real request, so it takes a slot like any other.
+                await _limiter.AcquireAsync(endpoint);
                 response = await Send(target = next);
             }
         }

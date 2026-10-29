@@ -11,7 +11,8 @@ static class Program
     {
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Write($"Fatal: {e.ExceptionObject}");
         // One self-contained executable per runtime in the GitHub release, e.g. DevOpsWatcher-osx-arm64.
-        Updater.AssetName = $"DevOpsWatcher-{RuntimeInformation.RuntimeIdentifier}{(OperatingSystem.IsWindows() ? ".exe" : "")}";
+        // Windows keeps the default DevOpsWatcher.exe, the name older installs update from.
+        if (!OperatingSystem.IsWindows()) Updater.AssetName = $"DevOpsWatcher-{RuntimeInformation.RuntimeIdentifier}";
 
         int shots = Array.FindIndex(args, a => a.Equals("--screenshots", StringComparison.OrdinalIgnoreCase));
         if (shots >= 0)

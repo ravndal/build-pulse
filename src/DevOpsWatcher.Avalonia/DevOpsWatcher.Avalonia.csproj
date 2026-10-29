@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Cross-platform (macOS, Windows, Linux) prototype of the tray app on Avalonia.
-       Polling, API clients and settings are shared with the WinForms app; only the UI lives here. -->
+  <!-- The tray app for Windows, macOS and Linux, on Avalonia.
+       Polling, API clients and settings live in src/Shared; only the UI lives here. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
@@ -11,6 +11,12 @@
     <RootNamespace>DevOpsWatcher</RootNamespace>
     <Version>1.0.0</Version>
     <ApplicationIcon>..\..\assets\app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!-- Published executable: trim unused framework code and compress the single file (win-x64 ~104 MB -> ~23 MB). -->
+  <PropertyGroup>
+    <PublishTrimmed>true</PublishTrimmed>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
 
   <ItemGroup>

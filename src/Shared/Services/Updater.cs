@@ -36,7 +36,7 @@ static partial class Updater
     const string Repo = "ravndal/devops-pipline-watcher";
     public const string UpdatedArg = "--updated";
 
-    /// <summary>The release asset this build updates from: the WinForms exe, or one cross-platform executable per runtime.</summary>
+    /// <summary>The release asset this build updates from: DevOpsWatcher.exe on Windows, one executable per runtime elsewhere.</summary>
     public static string AssetName { get; set; } = "DevOpsWatcher.exe";
 
     static readonly string DownloadDir = Path.Combine(

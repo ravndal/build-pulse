@@ -2,7 +2,7 @@
 
 <img src="assets/app.png" width="96" alt="DevOps Watcher icon">
 
-A small Windows tray app that watches selected Azure DevOps pipelines and GitHub Actions workflows, on one or more servers.
+A small tray app for Windows, macOS and Linux that watches selected Azure DevOps pipelines and GitHub Actions workflows, on one or more servers.
 
 | Tray icon | Meaning |
 |---|---|
@@ -38,20 +38,20 @@ The Release workflow publishes the single-file exe with that version and creates
 Requires the .NET 10 SDK.
 
 ```bash
-dotnet build src/DevOpsWatcher.WinForms -c Release
+dotnet build src/DevOpsWatcher.Avalonia -c Release
 ```
 
 ```bash
-src/DevOpsWatcher.WinForms/bin/Release/net10.0-windows/DevOpsWatcher.exe
+src/DevOpsWatcher.Avalonia/bin/Release/net10.0/DevOpsWatcher.exe
 ```
 
 To get a single self-contained exe:
 
 ```bash
-dotnet publish src/DevOpsWatcher.WinForms -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish
+dotnet publish src/DevOpsWatcher.Avalonia -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
 ```
 
-The cross-platform (macOS, Linux, Windows) Avalonia build is in `src/DevOpsWatcher.Avalonia`; `DevOpsWatcher.slnx` opens both apps.
+Use another runtime (`osx-arm64`, `osx-x64`, `linux-x64`) for macOS or Linux.
 
 ### Repository layout
 
@@ -61,8 +61,7 @@ The cross-platform (macOS, Linux, Windows) Avalonia build is in `src/DevOpsWatch
 | `src/Shared/Sources` | Azure DevOps and GitHub API clients, demo source, rate limiter |
 | `src/Shared/Services` | Polling, self-update, run at startup, secret storage |
 | `src/Shared/Infrastructure` | JSON, logging and formatting helpers |
-| `src/DevOpsWatcher.WinForms` | Windows tray app (WinForms UI) |
-| `src/DevOpsWatcher.Avalonia` | Cross-platform tray app (Avalonia UI) |
+| `src/DevOpsWatcher.Avalonia` | The tray app (Avalonia UI) |
 | `src/tools` | `make-icon.cs`, which regenerates `assets/app.ico` and `assets/app.png` |
 
 Run with `--demo` to try the UI with fake pipelines and no server. A deployment asks for approval about 45 seconds after start.

@@ -22,7 +22,7 @@ jobs:
         shell: pwsh
         run: |
           $version = '${{ github.ref_name }}'.TrimStart('v')
-          dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:Version=$version -o publish
+          dotnet publish src/DevOpsWatcher.WinForms -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:Version=$version -o publish
 
       - name: Create GitHub release
         shell: pwsh
@@ -51,7 +51,7 @@ jobs:
       - name: Publish single-file executable
         run: |
           version="${GITHUB_REF_NAME#v}"
-          dotnet publish avalonia/DevOpsWatcher.Avalonia.csproj -c Release -r ${{ matrix.rid }} --self-contained \
+          dotnet publish src/DevOpsWatcher.Avalonia -c Release -r ${{ matrix.rid }} --self-contained \
             -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:Version=$version -o publish
           mv publish/DevOpsWatcher "publish/DevOpsWatcher-${{ matrix.rid }}"
 

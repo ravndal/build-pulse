@@ -10,13 +10,12 @@
     <AssemblyName>DevOpsWatcher</AssemblyName>
     <RootNamespace>DevOpsWatcher</RootNamespace>
     <Version>1.0.0</Version>
-    <ApplicationIcon>..\assets\app.ico</ApplicationIcon>
+    <ApplicationIcon>..\..\assets\app.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="..\Models.cs;..\AppSettings.cs;..\Json.cs;..\Log.cs;..\RateLimiter.cs;..\GitHubClient.cs;..\AzDoClient.cs;..\DemoSource.cs;..\Poller.cs;..\Fmt.cs;..\Secrets.cs;..\Startup.cs;..\Updater.cs"
-             LinkBase="Shared" />
-    <AvaloniaResource Include="..\assets\app.png" Link="Assets\app.png" />
+    <Compile Include="..\Shared\**\*.cs" LinkBase="Shared" />
+    <AvaloniaResource Include="..\..\assets\app.png" Link="Assets\app.png" />
   </ItemGroup>
 
   <ItemGroup>

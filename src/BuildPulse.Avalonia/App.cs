@@ -108,7 +108,7 @@ sealed class App : Application
         TrayIcon.SetIcons(this, [_tray]);
 
         _watcher.Changed += Refresh;
-        _watcher.Notified += (accent, title, body, url) => Toast(accent, title, body, url);
+        _watcher.Notified += (tone, title, body, url) => Toast(Palette.Of(tone), title, body, url);
         Ticker.Subscribe(() => { if (_watcher.State is TrayState.Running or TrayState.Approval) { _frame++; RenderIcon(); } });
         desktop.Exit += (_, _) => { _updateTimer.Stop(); _watcher.Dispose(); };
 

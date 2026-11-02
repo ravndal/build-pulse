@@ -16,10 +16,17 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Build
-        run: dotnet build src/BuildPulse.Avalonia -c Release
+        run: |
+          dotnet build src/BuildPulse.Avalonia -c Release
+          dotnet build src/BuildPulse.Tui -c Release
 
       - name: Publish single-file exe
         run: dotnet publish src/BuildPulse.Avalonia -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
+
+      - name: Publish terminal app
+        run: |
+          dotnet publish src/BuildPulse.Tui -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish-tui
+          publish-tui/buildpulse-tui.exe --snapshot 60x16 2
 
       - name: Build MSI installer
         run: dotnet build installer -c Release -p:PublishDir=../publish/
@@ -29,6 +36,7 @@ jobs:
           name: BuildPulse-${{ github.sha }}
           path: |
             publish/BuildPulse.exe
+            publish-tui/buildpulse-tui.exe
             installer/bin/Release/BuildPulse.msi
 
   # Trimming can drop code that is only reached at runtime, so render every window from the trimmed
@@ -54,3 +62,9 @@ jobs:
         run: |
           publish/BuildPulse --screenshots shots
           test "$(ls shots/*.png | wc -l)" -eq 10
+
+      - name: Render a terminal app frame
+        run: |
+          dotnet publish src/BuildPulse.Tui -c Release -r ${{ matrix.rid }} --self-contained -p:PublishSingleFile=true -o publish-tui
+          publish-tui/buildpulse-tui --snapshot 60x16 2 | tee frame.txt
+          grep -q "Build Pulse" frame.txt

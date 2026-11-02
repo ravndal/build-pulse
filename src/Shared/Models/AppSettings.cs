@@ -121,7 +121,7 @@ public sealed class AppSettings
     [JsonIgnore]
     public bool IsConfigured => Servers.Any(s => s.Url != "" && s.HasCredentials && s.Pipelines.Count > 0);
 
-    static string FilePath => Path.Combine(AppInfo.DataDir, "settings.json");
+    public static string FilePath => Path.Combine(AppInfo.DataDir, "settings.json");
 
     public static AppSettings Load()
     {

@@ -103,3 +103,20 @@ public interface IPipelineSource : IDisposable
     /// <summary>Experimental: resumes or rejects a waiting ManualValidation task. Throws if the step is still waiting afterwards.</summary>
     Task CompleteManualValidationAsync(ApprovalInfo validation, bool resume);
 }
+
+/// <summary>Everything the dashboard shows, as one snapshot from <see cref="Watcher"/>.</summary>
+public sealed record DashboardModel(
+    IReadOnlyList<ServerConfig> Servers,
+    IReadOnlyList<BuildInfo> Builds,
+    IReadOnlyList<ApprovalInfo> Approvals,
+    IReadOnlyDictionary<string, string> Stages,
+    IReadOnlyDictionary<string, IReadOnlyList<StageStatus>> StageStatuses,
+    DateTime? LastPoll,
+    string? Error,
+    TrayState State,
+    UpdateStatus Update,
+    IReadOnlyCollection<string> CollapsedPanels)
+{
+    public static readonly DashboardModel Empty = new([], [], [], new Dictionary<string, string>(),
+        new Dictionary<string, IReadOnlyList<StageStatus>>(), null, null, TrayState.Unconfigured, new UpdateStatus(UpdateStage.Unsupported), []);
+}

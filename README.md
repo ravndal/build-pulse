@@ -66,6 +66,16 @@ The tray icon needs a desktop with a system tray (StatusNotifierItem / AppIndica
 
 **Known limitation:** Linux has no token store yet, so saving a server with a PAT or token fails there. `--demo` works.
 
+### Terminal app
+
+`buildpulse-tui` shows the same dashboard in a terminal, sized for a tmux split: it stays readable down to about 40×8 and drops columns as the pane gets narrower. Download `buildpulse-tui.exe` (Windows) or `buildpulse-tui-<runtime>` (macOS, Linux) from the release and run it.
+
+- A pending approval rings the terminal bell (tmux marks the window), pulses the header orange and is selected for you: **a** approves (or resumes a manual validation), **x** rejects, each after a **y/n** confirm.
+- **↑↓** / **j k** move, **⏎** opens the run in the browser or folds a repo, **tab** switches between pipelines and history, **r** refreshes, **m** mutes status toasts, **?** lists the keys, **q** quits.
+- The pane title follows the state (`Build Pulse ! 1 waiting`).
+
+It reads the tray app's `settings.json` and tokens, so add servers and pipelines in the tray app's Settings first; the terminal app picks up changes while it runs. It can run beside the tray app. Colors are 24-bit where the terminal sets `COLORTERM=truecolor`, 256-color otherwise, and off with `NO_COLOR`. It doesn't update itself; download the new release. `buildpulse-tui --demo` tries it with fake pipelines.
+
 ### Updates
 
 The app never updates itself on its own. The dashboard footer (and the tray menu) has a **Check for updates** button; the app also looks quietly 30 seconds after start and then every 6 hours. When a newer release is found the button changes to **Update to vX.Y.Z**, and only clicking it downloads the new executable, checks its SHA-256 against the release, and restarts into it. This works the same for MSI installs.
@@ -142,6 +152,12 @@ dotnet publish src/BuildPulse.Avalonia -c Release -r win-x64 --self-contained -p
 
 Use another runtime (`osx-arm64`, `osx-x64`, `linux-x64`) for macOS or Linux.
 
+The terminal app builds and publishes the same way from `src/BuildPulse.Tui`. `--snapshot 60x16 [seconds] [keys]` runs its demo off-screen, presses the keys and prints one frame, for checking layouts at a pane size (CI uses it as the terminal app's smoke test):
+
+```bash
+dotnet run --project src/BuildPulse.Tui -- --snapshot 60x16 50 a
+```
+
 ### MSI installer
 
 The installer is a [WiX](https://wixtoolset.org) project in `installer/` that wraps the published `BuildPulse.exe`. It builds on Windows only; WiX comes from NuGet, nothing else to install. Publish the win-x64 exe as above, then:
@@ -158,9 +174,10 @@ The MSI lands in `installer/bin/Release/BuildPulse.msi`. Keep the `UpgradeCode` 
 |---|---|
 | `src/Shared/Models` | Settings and pipeline/run data types |
 | `src/Shared/Sources` | Azure DevOps and GitHub API clients, demo source, rate limiter |
-| `src/Shared/Services` | Polling, self-update, run at startup, secret storage |
+| `src/Shared/Services` | Polling and change detection (`Watcher`), self-update, run at startup, secret storage |
 | `src/Shared/Infrastructure` | JSON, logging and formatting helpers |
 | `src/BuildPulse.Avalonia` | The tray app (Avalonia UI) |
+| `src/BuildPulse.Tui` | The terminal app (plain ANSI, no UI library) |
 | `src/tools` | `make-icon.cs`, which regenerates `assets/app.ico` and `assets/app.png` |
 | `installer` | WiX project for the Windows MSI |
 

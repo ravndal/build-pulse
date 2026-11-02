@@ -422,7 +422,6 @@ sealed class Dashboard
         foreach (var item in _items)
         {
             bool sel = item.Key == _selected;
-            if (sel) selTop = rows.Count;
             if (item.Kind == Kind.Section && rows.Count > 0 && height >= 10) rows.Add(new Line());
             if (item.Kind == Kind.Group && rows.Count > 0 && height >= 14) rows.Add(new Line());
             if (sel) selTop = rows.Count;

@@ -16,6 +16,8 @@
   <PropertyGroup>
     <PublishTrimmed>true</PublishTrimmed>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- Minimal servers often lack libicu, which .NET otherwise needs at start; the app formats nothing by culture. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
   <ItemGroup>

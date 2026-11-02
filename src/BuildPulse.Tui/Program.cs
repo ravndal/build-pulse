@@ -16,9 +16,9 @@ static class Program
                   --demo      fake pipelines, no server (an approval shows up after ~45s)
                   --version   print the version
 
-                Servers and pipelines come from the tray app's settings:
+                Press s in the app to add servers and pick pipelines; ? lists the keys.
+                Settings are shared with the tray app:
                   {AppSettings.FilePath}
-                Press ? in the app for keys.
                 """);
             return 0;
         }
@@ -57,7 +57,7 @@ static class Program
         var size = (args.FirstOrDefault() ?? "60x16").Split('x');
         int width = int.Parse(size[0]), height = int.Parse(size[1]);
         double seconds = args.Length > 1 ? double.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture) : 3;
-        var keys = args.Length > 2 ? args[2].Replace(@"\t", "\t").Replace(@"\n", "\n") : "";
+        var keys = Keys(args.Length > 2 ? args[2] : "");
 
         Console.OutputEncoding = System.Text.Encoding.UTF8;
         var loop = new MainLoop();
@@ -66,12 +66,47 @@ static class Program
         {
             dashboard.Start(readKeys: false);
             await Task.Delay(TimeSpan.FromSeconds(seconds));
-            foreach (var c in keys) dashboard.OnKey(Key(c));
+            foreach (var key in keys)
+            {
+                if (key == null) await Task.Delay(500);
+                else dashboard.OnKey(key.Value);
+            }
             Console.Out.Write(dashboard.Capture());
             dashboard.Quit();
         });
         loop.Run();
         return 0;
+    }
+
+    static readonly Dictionary<string, ConsoleKey> Named = new()
+    {
+        ["up"] = ConsoleKey.UpArrow, ["down"] = ConsoleKey.DownArrow, ["left"] = ConsoleKey.LeftArrow, ["right"] = ConsoleKey.RightArrow,
+        ["esc"] = ConsoleKey.Escape, ["enter"] = ConsoleKey.Enter, ["tab"] = ConsoleKey.Tab, ["bs"] = ConsoleKey.Backspace,
+        ["space"] = ConsoleKey.Spacebar,
+    };
+
+    /// <summary>
+    /// Snapshot keys: characters as typed, \t and \n, named keys in angle brackets (&lt;down&gt;, &lt;esc&gt;, ...),
+    /// and &lt;wait&gt; (null) for half a second, e.g. to let a connect finish.
+    /// </summary>
+    static List<ConsoleKeyInfo?> Keys(string text)
+    {
+        var keys = new List<ConsoleKeyInfo?>();
+        text = text.Replace(@"\t", "\t").Replace(@"\n", "\n");
+        for (int i = 0; i < text.Length; i++)
+        {
+            int end = text[i] == '<' ? text.IndexOf('>', i) : -1;
+            var name = end > i ? text[(i + 1)..end] : null;
+            if (name == "wait") { keys.Add(null); i = end; }
+            else if (name != null && Named.TryGetValue(name, out var named))
+            {
+                char c = named switch { ConsoleKey.Enter => '\r', ConsoleKey.Tab => '\t', ConsoleKey.Spacebar => ' ', ConsoleKey.Escape => '\e', ConsoleKey.Backspace => '\b', _ => '\0' };
+                keys.Add(new ConsoleKeyInfo(c, named, false, false, false));
+                i = end;
+            }
+            else keys.Add(Key(text[i]));
+        }
+        return keys;
     }
 
     static ConsoleKeyInfo Key(char c)
@@ -81,7 +116,10 @@ static class Program
             '\t' => ConsoleKey.Tab,
             '\n' => ConsoleKey.Enter,
             ' ' => ConsoleKey.Spacebar,
-            '?' => ConsoleKey.Oem2,
+            '?' or '/' => ConsoleKey.Oem2,
+            '-' => ConsoleKey.OemMinus,
+            '.' => ConsoleKey.OemPeriod,
+            ',' => ConsoleKey.OemComma,
             >= '0' and <= '9' => ConsoleKey.D0 + (c - '0'),
             _ => (ConsoleKey)char.ToUpperInvariant(c),
         };

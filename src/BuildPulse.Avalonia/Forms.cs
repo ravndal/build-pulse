@@ -80,10 +80,7 @@ sealed class FormGrid : Grid
     }
 
     /// <summary>Where tokens end up, for the hint under the token box.</summary>
-    public static string TokenStorage =>
-        OperatingSystem.IsWindows() ? "Stored encrypted for your Windows user."
-        : OperatingSystem.IsMacOS() ? "Stored in your login Keychain."
-        : "Tokens can't be stored securely on this OS yet.";
+    public static string TokenStorage => Secrets.StorageText;
 }
 
 /// <summary>Avalonia has no MessageBox: a small modal with a message and OK (and optionally Cancel).</summary>

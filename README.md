@@ -64,17 +64,16 @@ chmod +x BuildPulse-linux-x64
 
 The tray icon needs a desktop with a system tray (StatusNotifierItem / AppIndicator).
 
-**Known limitation:** Linux has no token store yet, so saving a server with a PAT or token fails there. `--demo` works.
-
 ### Terminal app
 
 `buildpulse-tui` shows the same dashboard in a terminal, sized for a tmux split: it stays readable down to about 40×8 and drops columns as the pane gets narrower. Download `buildpulse-tui.exe` (Windows) or `buildpulse-tui-<runtime>` (macOS, Linux) from the release and run it.
 
 - A pending approval rings the terminal bell (tmux marks the window), pulses the header orange and is selected for you: **a** approves (or resumes a manual validation), **x** rejects, each after a **y/n** confirm.
-- **↑↓** / **j k** move, **⏎** opens the run in the browser or folds a repo, **tab** switches between pipelines and history, **r** refreshes, **m** mutes status toasts, **?** lists the keys, **q** quits.
+- **↑↓** / **j k** move, **⏎** opens the run in the browser or folds a repo, **tab** switches between pipelines and history, **r** refreshes, **m** mutes status toasts, **s** opens settings, **?** lists the keys, **q** quits.
+- **s** adds, edits and removes servers, picks pipelines from a project tree (**space** ticks, **/** filters, **s** saves) and sets the poll interval, so it can be set up entirely over SSH on a server with no desktop. It opens by itself when no server is set up.
 - The pane title follows the state (`Build Pulse ! 1 waiting`).
 
-It reads the tray app's `settings.json` and tokens, so add servers and pipelines in the tray app's Settings first; the terminal app picks up changes while it runs. It can run beside the tray app. Colors are 24-bit where the terminal sets `COLORTERM=truecolor`, 256-color otherwise, and off with `NO_COLOR`. It doesn't update itself; download the new release. `buildpulse-tui --demo` tries it with fake pipelines.
+It shares `settings.json` and tokens with the tray app, and each picks up changes the other makes while it runs. It can run beside the tray app. Colors are 24-bit where the terminal sets `COLORTERM=truecolor`, 256-color otherwise, and off with `NO_COLOR`. It doesn't update itself; download the new release. `buildpulse-tui --demo` tries it with fake pipelines.
 
 ### Updates
 
@@ -103,7 +102,7 @@ On first run Settings opens with **Add server**. Add as many servers as you like
 1. Use a fine-grained token with repository permissions *Actions (Read)* and *Deployments (Read & write)*, or a classic token with the `repo` scope. Approving needs the write permission and that you're a required reviewer on the environment.
 2. Click **Connect**, expand repositories, and tick the workflows you want to track.
 
-Settings are saved in `%APPDATA%\BuildPulse\settings.json` on Windows and `~/.config/BuildPulse/settings.json` on macOS and Linux. Tokens are encrypted with Windows DPAPI for your user on Windows and kept in the login Keychain on macOS. Settings from older versions (one Azure DevOps server) are moved into the server list on first start.
+Settings are saved in `%APPDATA%\BuildPulse\settings.json` on Windows and `~/.config/BuildPulse/settings.json` on macOS and Linux. Tokens are encrypted with Windows DPAPI for your user on Windows and kept in the login Keychain on macOS. On Linux, and on macOS when the Keychain can't be used (it's locked in an SSH session), they're kept in files under `~/.config/BuildPulse/tokens` that only your user can read, like the GitHub CLI does. Settings from older versions (one Azure DevOps server) are moved into the server list on first start.
 
 ### Good to know
 
@@ -152,7 +151,8 @@ dotnet publish src/BuildPulse.Avalonia -c Release -r win-x64 --self-contained -p
 
 Use another runtime (`osx-arm64`, `osx-x64`, `linux-x64`) for macOS or Linux.
 
-The terminal app builds and publishes the same way from `src/BuildPulse.Tui`. `--snapshot 60x16 [seconds] [keys]` runs its demo off-screen, presses the keys and prints one frame, for checking layouts at a pane size (CI uses it as the terminal app's smoke test):
+The terminal app builds and publishes the same way from `src/BuildPulse.Tui`. `--snapshot 60x16 [seconds] [keys]` runs its demo off-screen, presses the keys and prints one frame, for checking layouts at a pane size (CI uses it as the terminal app's smoke test). Keys are typed as characters, with `
+`, `	`, named keys such as `<down>`, `<esc>` and `<space>`, and `<wait>` for half a second:
 
 ```bash
 dotnet run --project src/BuildPulse.Tui -- --snapshot 60x16 50 a

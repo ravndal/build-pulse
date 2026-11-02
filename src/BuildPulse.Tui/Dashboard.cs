@@ -52,6 +52,7 @@ sealed class Dashboard
     string? _busy;
     bool _help, _muted;
     DateTime _settingsStamp;
+    SettingsScreen? _settings;
 
     public Dashboard(MainLoop loop, bool demo, Terminal term)
     {
@@ -82,6 +83,21 @@ sealed class Dashboard
         }) { IsBackground = true, Name = "Keys" };
         if (readKeys) input.Start();
         Quit = () => { ticker.Dispose(); _watcher.Dispose(); _term.Leave(); _loop.Stop(); };
+        if (!_demo && _watcher.Settings.Servers.Count == 0) OpenSettings();
+    }
+
+    void OpenSettings()
+    {
+        _help = false;
+        _settings = new SettingsScreen(_watcher.Settings, _demo, SaveSettings, () => { _settings = null; Draw(); },
+            Toast, (question, tone, yes) => _prompt = new Prompt(question, tone, yes), Draw);
+    }
+
+    void SaveSettings(AppSettings settings)
+    {
+        if (!_demo) settings.Save();
+        _settingsStamp = SettingsStamp();
+        _watcher.Apply(settings);
     }
 
     public Action Quit { get; private set; } = () => { };
@@ -124,7 +140,7 @@ sealed class Dashboard
         _frame++;
         if (_toast is { } t && t.Until < DateTime.Now) _toast = null;
         // The tray app may have changed the servers or pipelines.
-        if (!_demo && _frame % 50 == 0 && SettingsStamp() is var stamp && stamp != _settingsStamp)
+        if (!_demo && _settings == null && _frame % 50 == 0 && SettingsStamp() is var stamp && stamp != _settingsStamp)
         {
             _settingsStamp = stamp;
             _watcher.Apply(AppSettings.Load());
@@ -192,8 +208,7 @@ sealed class Dashboard
         if (_model.State == TrayState.Unconfigured)
         {
             items.Add(new Item(Kind.Note, "x:1", "Nothing to watch yet."));
-            items.Add(new Item(Kind.Note, "x:2", "Add servers and pipelines in the Build Pulse"));
-            items.Add(new Item(Kind.Note, "x:3", "tray app (Settings), or try --demo."));
+            items.Add(new Item(Kind.Note, "x:2", "Press s to add a server, or try --demo."));
         }
         else if (_model.LastPoll == null && items.Count == 0)
             items.Add(new Item(Kind.Note, "x:1", "Loading…"));
@@ -213,6 +228,12 @@ sealed class Dashboard
         {
             if (key.Key is ConsoleKey.Y or ConsoleKey.Enter) { _prompt = null; _ = Run(prompt.Confirmed); }
             else if (key.Key is ConsoleKey.N or ConsoleKey.Escape or ConsoleKey.Q) _prompt = null;
+            Draw();
+            return;
+        }
+        if (_settings != null)
+        {
+            _settings.OnKey(key);
             Draw();
             return;
         }
@@ -262,6 +283,7 @@ sealed class Dashboard
                 _muted = !_muted;
                 Toast(_muted ? "Status toasts muted" : "Status toasts on", Tone.Gray);
                 break;
+            case ConsoleKey.S or ConsoleKey.OemComma: OpenSettings(); break;
             case ConsoleKey.Oem2 or ConsoleKey.F1: _help = true; break; // '?' and '/'
             case ConsoleKey.Q or ConsoleKey.Escape: Quit(); return;
             default:
@@ -332,7 +354,7 @@ sealed class Dashboard
             _selected = (_items.FirstOrDefault(i => i.Kind is Kind.Approval or Kind.Build or Kind.NoRuns) ?? _items.FirstOrDefault(i => i.Selectable))?.Key;
 
         _above = _below = 0;
-        var body = (_help ? Help() : Body()).ToList();   // first: it works out the scroll hints
+        var body = (_settings?.Body(width, BodyHeight) ?? (_help ? Help() : Body())).ToList();   // first: it works out the scroll hints
         var lines = new List<Line> { Header() };
         if (height >= 5) lines.Add(SubHeader());
         lines.AddRange(body);
@@ -388,7 +410,7 @@ sealed class Dashboard
         var right = new Line();
         if (_width >= 30)
         {
-            right.Add(_view == View.Pipelines ? "pipelines" : "history", Colors.Blue);
+            right.Add(_settings?.Heading ?? (_view == View.Pipelines ? "pipelines" : "history"), Colors.Blue);
             right.Add(" · ", Colors.Faint);
         }
         right.Add(_busy ?? (_model.LastPoll is { } t ? Since(t) : "…"), _busy != null ? Colors.Amber : Colors.Muted);
@@ -404,7 +426,7 @@ sealed class Dashboard
 
     Line SubHeader()
     {
-        if (_model.Error is { } error)
+        if (_model.Error is { } error && _settings == null)
             return new Line().Add(" ✕ ", Colors.Red, bold: true).Add(error.ReplaceLineEndings(" "), Colors.Red);
         var rule = new Line().Add(new string('─', _width), Colors.Faint);
         return _above > 0 ? Line.Spread(rule, new Line().Add($" ▲ {_above} ", Colors.Muted), _width) : rule;
@@ -603,7 +625,7 @@ sealed class Dashboard
         [
             ("↑↓ j k", "move"), ("⏎ o", "open in browser / fold"), ("← →", "fold / unfold repo"),
             ("a", "approve or resume"), ("x d", "reject"), ("tab 1 2", "pipelines / history"),
-            ("r", "refresh now"), ("m", "mute status toasts"), ("q esc", "quit"),
+            ("r", "refresh now"), ("m", "mute status toasts"), ("s", "settings: servers, pipelines"), ("q esc", "quit"),
         ];
         yield return new Line().Add(" KEYS", Colors.Blue, bold: true);
         foreach (var (key, what) in keys.Take(Math.Max(0, BodyHeight - 1)))
@@ -631,15 +653,24 @@ sealed class Dashboard
             if (hints.Length > 0) hints.Add("  ");
             hints.Add(key, Colors.Blue, bold: true).Add(" " + what, Colors.Muted);
         }
+        if (_settings != null)
+        {
+            foreach (var (key, what) in _settings.Hints(_width))
+                if (hints.Length + key.Length + what.Length + 4 <= _width) Hint(key, what);
+            return new Line().Add(" ").Add(hints);
+        }
         if (_width >= 64)
         {
             Hint("↑↓", "move"); Hint("⏎", "open");
             if (_model.Approvals.Count > 0) { Hint("a", "approve"); Hint("x", "reject"); }
-            Hint("tab", "view"); Hint("r", "refresh"); Hint("?", "help"); Hint("q", "quit");
+            Hint("tab", "view"); Hint("r", "refresh");
+            if (_width >= 84 || _model.State == TrayState.Unconfigured) Hint("s", "settings");
+            Hint("?", "help"); Hint("q", "quit");
         }
         else
         {
             if (_model.Approvals.Count > 0) { Hint("a", "ok"); Hint("x", "no"); }
+            if (_model.State == TrayState.Unconfigured) Hint("s", "setup");
             Hint("⏎", "open"); Hint("tab", "view"); Hint("?", "help");
         }
         var more = _below > 0 ? new Line().Add($"▼ {_below} ", Colors.Muted) : new Line();

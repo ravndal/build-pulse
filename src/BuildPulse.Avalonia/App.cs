@@ -197,7 +197,7 @@ sealed class App : Application
     {
         var window = new ApprovalWindow(approval) { Decide = _watcher!.DecideAsync };
         OpensSettings(window);
-        window.Snoozed += a => _snoozedUntil[a.Key] = DateTime.Now.AddMinutes(15);
+        window.Snoozed += (a, until) => _snoozedUntil[a.Key] = until;
         window.Closed += (_, _) =>
         {
             if (_approvalWindows.TryGetValue(approval.Key, out var current) && current == window)

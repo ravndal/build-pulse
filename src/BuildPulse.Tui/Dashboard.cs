@@ -283,7 +283,7 @@ sealed class Dashboard
                 _muted = !_muted;
                 Toast(_muted ? "Status toasts muted" : "Status toasts on", Tone.Gray);
                 break;
-            case ConsoleKey.S or ConsoleKey.OemComma: OpenSettings(); break;
+            case ConsoleKey.S or ConsoleKey.OemComma: OpenSettings(); break; // also ctrl+, where the terminal passes it on
             case ConsoleKey.Oem2 or ConsoleKey.F1: _help = true; break; // '?' and '/'
             case ConsoleKey.Q or ConsoleKey.Escape: Quit(); return;
             default:
@@ -625,7 +625,7 @@ sealed class Dashboard
         [
             ("↑↓ j k", "move"), ("⏎ o", "open in browser / fold"), ("← →", "fold / unfold repo"),
             ("a", "approve or resume"), ("x d", "reject"), ("tab 1 2", "pipelines / history"),
-            ("r", "refresh now"), ("m", "mute status toasts"), ("s", "settings: servers, pipelines"), ("q esc", "quit"),
+            ("r", "refresh now"), ("m", "mute status toasts"), ("s ctrl+,", "settings: servers, pipelines"), ("q esc", "quit"),
         ];
         yield return new Line().Add(" KEYS", Colors.Blue, bold: true);
         foreach (var (key, what) in keys.Take(Math.Max(0, BodyHeight - 1)))

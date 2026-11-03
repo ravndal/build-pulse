@@ -27,7 +27,7 @@ A small tray app that watches selected Azure DevOps pipelines and GitHub Actions
 - **Approvals** pop up in the bottom-right corner and stay until you **Approve**, **Reject** (asks you to confirm), **Open** it in the browser, or **Later** (snoozes it for 15 minutes; the icon keeps flashing).
 - **Other status changes** (started, stage changed, succeeded, failed, ...) show as toasts that fade after about 6 seconds. You can mute them from the tray menu.
 - **Left-click** the icon to open the dashboard: pending approvals plus the last 8 builds. Click a row to open it in the browser. Click a panel's header to collapse it to one status icon per pipeline (hover an icon for details, click it to open the run); collapsed panels stay collapsed across restarts.
-- **Right-click** the icon for Refresh, Settings, Mute, Start with Windows (Open at login on macOS), and Exit.
+- **Right-click** the icon for Refresh, Settings, Mute, Start with Windows (Open at login on macOS), and Exit. **Ctrl+,** (**⌘,** on macOS) opens Settings from the dashboard or a popup.
 
 ## Install
 
@@ -69,7 +69,7 @@ The tray icon needs a desktop with a system tray (StatusNotifierItem / AppIndica
 `buildpulse-tui` shows the same dashboard in a terminal, sized for a tmux split: it stays readable down to about 40×8 and drops columns as the pane gets narrower. Download `buildpulse-tui.exe` (Windows) or `buildpulse-tui-<runtime>` (macOS, Linux) from the release and run it.
 
 - A pending approval rings the terminal bell (tmux marks the window), pulses the header orange and is selected for you: **a** approves (or resumes a manual validation), **x** rejects, each after a **y/n** confirm.
-- **↑↓** / **j k** move, **⏎** opens the run in the browser or folds a repo, **tab** switches between pipelines and history, **r** refreshes, **m** mutes status toasts, **s** opens settings, **?** lists the keys, **q** quits.
+- **↑↓** / **j k** move, **⏎** opens the run in the browser or folds a repo, **tab** switches between pipelines and history, **r** refreshes, **m** mutes status toasts, **s** or **ctrl+,** opens settings, **?** lists the keys, **q** quits.
 - **s** adds, edits and removes servers, picks pipelines from a project tree (**space** ticks, **/** filters, **s** saves) and sets the poll interval, so it can be set up entirely over SSH on a server with no desktop. It opens by itself when no server is set up.
 - The pane title follows the state (`Build Pulse ! 1 waiting`).
 

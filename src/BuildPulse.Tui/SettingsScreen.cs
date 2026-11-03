@@ -82,7 +82,7 @@ sealed class SettingsScreen
             case ConsoleKey.X or ConsoleKey.D or ConsoleKey.Delete:
                 if (server != null) Remove(server);
                 break;
-            case ConsoleKey.Escape or ConsoleKey.Q or ConsoleKey.S: Leave(); break;
+            case ConsoleKey.Escape or ConsoleKey.Q or ConsoleKey.S or ConsoleKey.OemComma: Leave(); break;
         }
     }
 

@@ -180,6 +180,7 @@ sealed class DashboardView : UserControl
         Grid.SetColumn(refresh, 2);
         grid.Children.Add(refresh);
         var settings = Link("Settings", () => SettingsRequested?.Invoke());
+        ToolTip.SetTip(settings, OperatingSystem.IsMacOS() ? "Settings (⌘,)" : "Settings (Ctrl+,)");
         Grid.SetColumn(settings, 3);
         grid.Children.Add(settings);
         return new Border { Background = Palette.Surface, BorderBrush = Palette.Border, BorderThickness = new Thickness(0, 1, 0, 0), Child = grid };

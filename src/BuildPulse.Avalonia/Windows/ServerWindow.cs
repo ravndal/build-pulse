@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -13,13 +12,8 @@ namespace BuildPulse;
 /// GitHub Enterprise); then only the values that target needs are asked for, followed by sign-in and the pipelines to track.
 /// Closes with the server, or null when cancelled.
 /// </summary>
-sealed partial class ServerWindow : Window
+sealed class ServerWindow : Window
 {
-    /// <summary>What the user connects to; finer than <see cref="ServerKind"/> because each asks for different values.</summary>
-    enum Target { AzureDevOps, AzureDevOpsServer, GitHub, GitHubEnterprise }
-
-    const string AzureDevOpsHost = "https://dev.azure.com";
-
     readonly ServerConfig _current;
     readonly RateLimitSettings _rateLimits;
     readonly bool _demo;
@@ -54,9 +48,9 @@ sealed partial class ServerWindow : Window
     readonly TextBlock _urlCaption;
 
     /// <summary>Rows that only some targets have: caption and control shown or hidden together.</summary>
-    readonly List<(Control[] Controls, Func<Target, bool> Shown)> _targetRows = [];
+    readonly List<(Control[] Controls, Func<ServerTarget, bool> Shown)> _targetRows = [];
 
-    Target _target;
+    ServerTarget _target;
     IPipelineSource? _client;
     List<(ProjectInfo Project, List<DefinitionInfo>? Definitions)> _projects = [];
     /// <summary>True once the server has listed its projects, so tracked pipelines it lacks can be shown as missing.</summary>
@@ -64,7 +58,7 @@ sealed partial class ServerWindow : Window
 
     const string MissingTag = "missing";
 
-    ServerKind Kind => _target is Target.GitHub or Target.GitHubEnterprise ? ServerKind.GitHub : ServerKind.AzureDevOps;
+    ServerKind Kind => ServerTargets.KindOf(_target);
 
     /// <param name="existing">The server to edit, or null to add one.</param>
     public ServerWindow(ServerConfig? existing, RateLimitSettings rateLimits, bool demo)
@@ -84,28 +78,28 @@ sealed partial class ServerWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         ShowInTaskbar = false;
 
-        _target = TargetOf(_current);
-        if (_target == Target.AzureDevOps) _org.Text = OrganizationOf(_current.Url) ?? "";
-        else if (_target != Target.GitHub) _url.Text = _current.Url;
+        _target = ServerTargets.Of(_current);
+        if (_target == ServerTarget.AzureDevOps) _org.Text = ServerTargets.OrganizationOf(_current.Url) ?? "";
+        else if (_target != ServerTarget.GitHub) _url.Text = _current.Url;
         _project.Text = _current.Project ?? "";
         _useWindows.IsChecked = _current.UseWindowsAuth;
         _usePat.IsChecked = !_current.UseWindowsAuth;
         _pat.PlaceholderText = _current.ProtectedPat != null ? "Saved – leave empty to keep" : "Paste your token";
 
-        void Row(string caption, Control control, Func<Target, bool>? shown = null, bool fill = false)
+        void Row(string caption, Control control, Func<ServerTarget, bool>? shown = null, bool fill = false)
         {
             var label = _details.Row(caption, control, fill);
             if (shown != null) _targetRows.Add(([label, control], shown));
         }
         Row("Type", FormGrid.Flow(_targetLogo, _targetName, _changeTarget));
-        Row("Organization", _org, t => t == Target.AzureDevOps);
-        Row("", FormGrid.Hint("Your organization's name, as in dev.azure.com/yourorg."), t => t == Target.AzureDevOps);
-        Row("Project", _project, t => t == Target.AzureDevOps);
-        Row("", FormGrid.Hint("Only list this project. Leave empty to see every project in the organization."), t => t == Target.AzureDevOps);
+        Row("Organization", _org, t => t == ServerTarget.AzureDevOps);
+        Row("", FormGrid.Hint("Your organization's name, as in dev.azure.com/yourorg."), t => t == ServerTarget.AzureDevOps);
+        Row("Project", _project, t => t == ServerTarget.AzureDevOps);
+        Row("", FormGrid.Hint("Only list this project. Leave empty to see every project in the organization."), t => t == ServerTarget.AzureDevOps);
         _urlCaption = _details.Row("Server URL", _url);
-        _targetRows.Add(([_urlCaption, _url], t => t is Target.AzureDevOpsServer or Target.GitHubEnterprise));
-        Row("", _urlHint, t => t is Target.AzureDevOpsServer or Target.GitHubEnterprise);
-        Row("Sign in with", FormGrid.Flow(_usePat, _useWindows), t => t == Target.AzureDevOpsServer && OperatingSystem.IsWindows());
+        _targetRows.Add(([_urlCaption, _url], t => t is ServerTarget.AzureDevOpsServer or ServerTarget.GitHubEnterprise));
+        Row("", _urlHint, t => t is ServerTarget.AzureDevOpsServer or ServerTarget.GitHubEnterprise);
+        Row("Sign in with", FormGrid.Flow(_usePat, _useWindows), t => t == ServerTarget.AzureDevOpsServer && OperatingSystem.IsWindows());
         Row("Token", _pat);
         Row("", _patHint);
         var connectRow = new DockPanel();
@@ -152,44 +146,36 @@ sealed partial class ServerWindow : Window
     }
 
     /// <summary>Shows the details page's fields for <paramref name="target"/>.</summary>
-    void ApplyTarget(Target target)
+    void ApplyTarget(ServerTarget target)
     {
         _target = target;
         bool gitHub = Kind == ServerKind.GitHub;
-        _targetName.Text = TargetName(target);
+        _targetName.Text = ServerTargets.Name(target);
         _targetLogo.Content = ProviderLogo.Create(Kind, 18);
         foreach (var (controls, shown) in _targetRows)
             foreach (var control in controls)
                 control.IsVisible = shown(target);
 
-        _urlCaption.Text = target == Target.AzureDevOpsServer ? "Collection URL" : "Server URL";
-        _url.PlaceholderText = target == Target.AzureDevOpsServer ? "https://tfs.company.com/tfs/DefaultCollection" : "https://github.company.com";
-        _urlHint.Text = target == Target.AzureDevOpsServer
+        _urlCaption.Text = target == ServerTarget.AzureDevOpsServer ? "Collection URL" : "Server URL";
+        _url.PlaceholderText = target == ServerTarget.AzureDevOpsServer ? "https://tfs.company.com/tfs/DefaultCollection" : "https://github.company.com";
+        _urlHint.Text = target == ServerTarget.AzureDevOpsServer
             ? "The full URL of your Azure DevOps Server collection."
             : "The full URL of your GitHub Enterprise Server (https://github.company.com) or GHE.com (https://company.ghe.com).";
-        _patHint.Text = (gitHub
-            ? "Fine-grained token with repository permissions Actions (Read) and Deployments (Read & write, to approve), "
-              + "or a classic token with the repo scope. "
-            : "PAT scopes: Build (Read & execute) and Project and Team (Read). ") + FormGrid.TokenStorage;
+        _patHint.Text = $"{ServerTargets.TokenHint(Kind)} {FormGrid.TokenStorage}";
         _filter.PlaceholderText = gitHub ? "Filter loaded repositories and workflows…" : "Filter loaded pipelines…";
-        if (target != Target.AzureDevOpsServer || !OperatingSystem.IsWindows()) _usePat.IsChecked = true;
+        if (target != ServerTarget.AzureDevOpsServer || !OperatingSystem.IsWindows()) _usePat.IsChecked = true;
         UpdateTrackedCount();
     }
 
     Control BuildPicker()
     {
         var grid = new UniformGrid { Columns = 2, Margin = new Thickness(0, 12, 0, 0) };
-        foreach (var (target, detail) in new (Target, string)[]
+        foreach (var target in ServerTargets.All)
         {
-            (Target.AzureDevOps, "dev.azure.com organization"),
-            (Target.AzureDevOpsServer, "On-premises collection URL"),
-            (Target.GitHub, "github.com"),
-            (Target.GitHubEnterprise, "Your GitHub server's URL"),
-        })
-        {
-            var kind = target is Target.GitHub or Target.GitHubEnterprise ? ServerKind.GitHub : ServerKind.AzureDevOps;
+            var kind = ServerTargets.KindOf(target);
+            var detail = ServerTargets.Detail(target);
             var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 2 };
-            text.Children.Add(new TextBlock { Text = TargetName(target), FontWeight = FontWeight.SemiBold, FontSize = 14 });
+            text.Children.Add(new TextBlock { Text = ServerTargets.Name(target), FontWeight = FontWeight.SemiBold, FontSize = 14 });
             text.Children.Add(new TextBlock { Text = detail, Foreground = Palette.Muted, FontSize = 12 });
             var logo = ProviderLogo.Create(kind, 28);
             logo.VerticalAlignment = VerticalAlignment.Center;
@@ -225,7 +211,7 @@ sealed partial class ServerWindow : Window
         _details.IsVisible = false;
     }
 
-    void PickTarget(Target target)
+    void PickTarget(ServerTarget target)
     {
         if (target != _target)
         {
@@ -239,75 +225,24 @@ sealed partial class ServerWindow : Window
             SetStatus("");
         }
         ApplyTarget(target);
-        Title = $"Add server – {TargetName(target)}";
+        Title = $"Add server – {ServerTargets.Name(target)}";
         _picker.IsVisible = false;
         _details.IsVisible = true;
         (target switch
         {
-            Target.AzureDevOps => _org,
-            Target.GitHub => _pat,
+            ServerTarget.AzureDevOps => _org,
+            ServerTarget.GitHub => _pat,
             _ => _url,
         }).Focus();
     }
 
-    static string TargetName(Target target) => target switch
-    {
-        Target.AzureDevOps => "Azure DevOps",
-        Target.AzureDevOpsServer => "Azure DevOps Server",
-        Target.GitHub => "GitHub",
-        _ => "GitHub Enterprise",
-    };
-
-    static Target TargetOf(ServerConfig server)
-    {
-        if (server.Kind == ServerKind.GitHub)
-            return server.Url == "" || server.Url.TrimEnd('/').Equals(ServerConfig.GitHubUrl, StringComparison.OrdinalIgnoreCase)
-                ? Target.GitHub : Target.GitHubEnterprise;
-        return server.Url == "" || OrganizationOf(server.Url) != null ? Target.AzureDevOps : Target.AzureDevOpsServer;
-    }
-
-    /// <summary>
-    /// The organization of an Azure DevOps Services URL (dev.azure.com/org/... or org.visualstudio.com),
-    /// a bare organization name, or null for anything else.
-    /// </summary>
-    static string? OrganizationOf(string text)
-    {
-        text = text.Trim().TrimEnd('/');
-        if (OrgName().IsMatch(text)) return text;
-        if (!text.Contains("://")) text = "https://" + text;
-        if (!Uri.TryCreate(text, UriKind.Absolute, out var uri)) return null;
-        if (uri.Host.Equals("dev.azure.com", StringComparison.OrdinalIgnoreCase))
-            return uri.Segments.Length > 1 && OrgName().IsMatch(uri.Segments[1].TrimEnd('/')) ? uri.Segments[1].TrimEnd('/') : null;
-        if (uri.Host.EndsWith(".visualstudio.com", StringComparison.OrdinalIgnoreCase))
-            return uri.Host[..uri.Host.IndexOf('.')];
-        return null;
-    }
-
-    [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9-]*$")]
-    private static partial Regex OrgName();
-
     /// <summary>The window's values as a server; null (with a message shown) when something required is missing.</summary>
     ServerConfig? ReadServer()
     {
-        string url;
-        switch (_target)
+        if (ServerTargets.UrlFor(_target, _org.Text ?? "", _url.Text ?? "", out var error) is not { } url)
         {
-            case Target.AzureDevOps:
-                var orgText = _org.Text?.Trim() ?? "";
-                if (orgText == "") { SetStatus("Enter your organization.", error: true); return null; }
-                if (OrganizationOf(orgText) is not { } org) { SetStatus("That isn't a valid organization name.", error: true); return null; }
-                url = $"{AzureDevOpsHost}/{org}";
-                break;
-            case Target.GitHub:
-                url = ServerConfig.GitHubUrl;
-                break;
-            default:
-                url = (_url.Text ?? "").Trim().TrimEnd('/');
-                if (url == "") { SetStatus("Enter the server URL.", error: true); return null; }
-                if (!url.Contains("://")) url = "https://" + url;
-                if (!Uri.TryCreate(url, UriKind.Absolute, out _)) { SetStatus("That isn't a valid URL.", error: true); return null; }
-                if (Https.Parse(url) == null) { SetStatus("The server must use https.", error: true); return null; }
-                break;
+            SetStatus(error, error: true);
+            return null;
         }
 
         var project = _project.Text?.Trim() ?? "";
@@ -316,8 +251,8 @@ sealed partial class ServerWindow : Window
             Id = _current.Id,
             Kind = Kind,
             Url = url,
-            UseWindowsAuth = _target == Target.AzureDevOpsServer && _useWindows.IsChecked == true,
-            Project = _target == Target.AzureDevOps && project != "" ? project : null,
+            UseWindowsAuth = _target == ServerTarget.AzureDevOpsServer && _useWindows.IsChecked == true,
+            Project = _target == ServerTarget.AzureDevOps && project != "" ? project : null,
             ProtectedPat = _current.ProtectedPat,
             Pipelines = _tracked.Values.OrderBy(p => p.Project).ThenBy(p => p.Name).ToList(),
         };

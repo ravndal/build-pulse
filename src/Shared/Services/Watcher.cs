@@ -1,18 +1,16 @@
-using Avalonia.Media;
-using Avalonia.Threading;
-
 namespace BuildPulse;
 
 /// <summary>
 /// Polls every configured server through <see cref="Poller"/>, merges the results and reports what changed:
 /// the dashboard model, status toasts for builds that start, move stage or finish, and the pending approvals.
+/// UI-free: events are raised on the context that called <see cref="Apply"/>, so the tray app gets them on its UI
+/// thread and the terminal app on its main loop.
 /// </summary>
 sealed class Watcher : IDisposable
 {
     sealed record BuildSnapshot(string Status, string? Result, string? Stage);
 
     readonly bool _demo;
-    readonly DispatcherTimer _timer = new();
     readonly DateTime _startedAt = DateTime.Now;
     readonly Dictionary<string, BuildSnapshot> _known = [];
     /// <summary>Approvals the user just decided: hidden entirely while the server catches up.</summary>
@@ -25,11 +23,12 @@ sealed class Watcher : IDisposable
     string? _error;
     bool _pollFailed, _polling, _baselined;
     DateTime? _lastPoll;
+    CancellationTokenSource? _loop;
 
     /// <summary>State, model or approvals changed.</summary>
     public event Action? Changed;
     /// <summary>A status change worth a toast: accent, title, body, link.</summary>
-    public event Action<Color, string, string, string?>? Notified;
+    public event Action<Tone, string, string, string?>? Notified;
 
     public AppSettings Settings { get; private set; }
     public TrayState State { get; private set; } = TrayState.Unconfigured;
@@ -41,7 +40,6 @@ sealed class Watcher : IDisposable
     {
         _demo = demo;
         Settings = demo ? DemoSource.CreateSettings() : AppSettings.Load();
-        _timer.Tick += (_, _) => _ = PollAsync();
     }
 
     /// <summary>Starts watching with <paramref name="settings"/>, dropping everything known about the previous ones.</summary>
@@ -63,10 +61,25 @@ sealed class Watcher : IDisposable
         foreach (var server in settings.Servers.Where(s => s.Url != "" && s.HasCredentials))
             _sources[server.Id] = server.CreateSource(settings.RateLimits, _demo);
 
-        _timer.Interval = TimeSpan.FromSeconds(Math.Max(10, settings.PollSeconds));
-        _timer.Start();
+        _loop?.Cancel();
+        _loop = new CancellationTokenSource();
+        _ = RunAsync(TimeSpan.FromSeconds(Math.Max(10, settings.PollSeconds)), _loop.Token);
         UpdateState();
         _ = PollAsync();
+    }
+
+    /// <summary>Polls every <paramref name="interval"/>; awaits resume on the caller's context, like a UI timer.</summary>
+    async Task RunAsync(TimeSpan interval, CancellationToken token)
+    {
+        try
+        {
+            while (true)
+            {
+                await Task.Delay(interval, token);
+                await PollAsync();
+            }
+        }
+        catch (OperationCanceledException) { }
     }
 
     public async Task PollAsync()
@@ -164,7 +177,7 @@ sealed class Watcher : IDisposable
         _approvals.RemoveAll(a => a.Key == approval.Key);
         UpdateState();
         var verb = approval.Kind == ApprovalKind.ManualValidation ? (approve ? "Resumed" : "Rejected") : (approve ? "Approved" : "Rejected");
-        Notified?.Invoke(approve ? Palette.Green : Palette.Red, verb,
+        Notified?.Invoke(approve ? Tone.Green : Tone.Red, verb,
             $"{approval.PipelineName} · {approval.RunName}{(approval.StageName is { } s ? $" · {s}" : "")}", approval.WebUrl);
         _ = PollAsync();
     }
@@ -207,17 +220,17 @@ sealed class Watcher : IDisposable
                 if (!_known.TryGetValue(b.Key, out var old))
                 {
                     if (b.IsActive)
-                        Notify(Palette.Blue, $"{b.DefinitionName} {(b.Status == "inProgress" ? "started" : "queued")}", b);
+                        Notify(Tone.Blue, $"{b.DefinitionName} {(b.Status == "inProgress" ? "started" : "queued")}", b);
                     else if (b.FinishTime > _startedAt)
                         NotifyResult(b);
                 }
                 else if (old.Status != "completed" && b.Status == "completed")
                     NotifyResult(b);
                 else if (old.Status == "notStarted" && b.Status == "inProgress")
-                    Notify(Palette.Blue, $"{b.DefinitionName} started", b);
+                    Notify(Tone.Blue, $"{b.DefinitionName} started", b);
                 else if (b.IsActive && stage != null && old.Stage != null && stage != old.Stage
                          && !stage.StartsWith(Poller.WaitingForApproval, StringComparison.Ordinal))
-                    Notify(Palette.Blue, $"{b.DefinitionName} → {stage}", b);
+                    Notify(Tone.Blue, $"{b.DefinitionName} → {stage}", b);
             }
             _known[b.Key] = new BuildSnapshot(b.Status, b.Result, stage);
         }
@@ -227,9 +240,9 @@ sealed class Watcher : IDisposable
         _baselined = true;
     }
 
-    void NotifyResult(BuildInfo b) => Notify(Palette.ForResult(b.Result).Color, $"{b.DefinitionName}: {Palette.ResultText(b.Result)}", b);
+    void NotifyResult(BuildInfo b) => Notify(Status.ForResult(b.Result).Tone, $"{b.DefinitionName}: {Status.ResultText(b.Result)}", b);
 
-    void Notify(Color accent, string title, BuildInfo b)
+    void Notify(Tone accent, string title, BuildInfo b)
     {
         if (Settings.ShowStatusPopups) Notified?.Invoke(accent, title, Fmt.BuildLine(b), b.WebUrl);
     }
@@ -267,7 +280,7 @@ sealed class Watcher : IDisposable
 
     public void Dispose()
     {
-        _timer.Stop();
+        _loop?.Cancel();
         foreach (var source in _sources.Values) source.Dispose();
     }
 }

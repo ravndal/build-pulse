@@ -4,21 +4,35 @@ using System.Text;
 
 namespace BuildPulse;
 
-/// <summary>Keeps PATs out of settings.json: DPAPI-encrypted on Windows, stored in the login Keychain on macOS.</summary>
+/// <summary>
+/// Keeps PATs out of settings.json: DPAPI-encrypted on Windows, stored in the login Keychain on macOS, and in
+/// files only the user can read on Linux (and on a Mac whose Keychain is locked, as over SSH).
+/// </summary>
 static class Secrets
 {
+    /// <summary>Where tokens are kept on this machine, for hints next to the token field.</summary>
+    public static string StorageText =>
+        OperatingSystem.IsWindows() ? "Stored encrypted for your Windows user."
+        : OperatingSystem.IsMacOS() ? "Stored in your login Keychain."
+        : $"Stored in {TokenFiles.Dir}, readable only by you.";
+
     public static string? Protect(string? plain, string? previousStored = null)
     {
         if (string.IsNullOrEmpty(plain)) return null;
-        if (OperatingSystem.IsWindows()) return Dpapi.Protect(plain);
-        if (OperatingSystem.IsMacOS())
+        string stored;
+        if (OperatingSystem.IsWindows()) stored = Dpapi.Protect(plain)!;
+        else if (OperatingSystem.IsMacOS())
         {
-            var stored = Keychain.Add(plain);
-            if (!string.IsNullOrEmpty(previousStored) && previousStored.StartsWith(Keychain.Prefix, StringComparison.Ordinal))
-                Delete(previousStored);
-            return stored;
+            try { stored = Keychain.Add(plain); }
+            catch (Exception ex)
+            {
+                Log.Write($"Keychain unavailable, keeping the token in a file instead: {ex.Message}");
+                stored = TokenFiles.Add(plain);
+            }
         }
-        throw new PlatformNotSupportedException("No secure store for tokens on this OS.");
+        else stored = TokenFiles.Add(plain);
+        Delete(previousStored);
+        return stored;
     }
 
     /// <summary>Null when there's nothing stored or it can't be read here (e.g. a DPAPI blob on a Mac).</summary>
@@ -27,16 +41,60 @@ static class Secrets
         if (string.IsNullOrEmpty(stored)) return null;
         if (stored.StartsWith(Keychain.Prefix, StringComparison.Ordinal))
             return OperatingSystem.IsMacOS() ? Keychain.Find(stored[Keychain.Prefix.Length..]) : null;
+        if (stored.StartsWith(TokenFiles.Prefix, StringComparison.Ordinal))
+            return TokenFiles.Find(stored[TokenFiles.Prefix.Length..]);
         return OperatingSystem.IsWindows() ? Dpapi.Unprotect(stored) : null;
     }
 
-    /// <summary>Removes a token that's no longer referenced. Only Keychain items live outside settings.json; DPAPI blobs need nothing.</summary>
+    /// <summary>Removes a token that's no longer referenced. DPAPI blobs live in settings.json and need nothing.</summary>
     public static void Delete(string? stored)
     {
-        if (string.IsNullOrEmpty(stored) || !stored.StartsWith(Keychain.Prefix, StringComparison.Ordinal) || !OperatingSystem.IsMacOS()) return;
-        try { Keychain.Delete(stored[Keychain.Prefix.Length..]); }
-        catch (Exception ex) { Log.Write($"Couldn't delete a Keychain token: {ex.Message}"); }
+        if (string.IsNullOrEmpty(stored)) return;
+        try
+        {
+            if (stored.StartsWith(TokenFiles.Prefix, StringComparison.Ordinal)) TokenFiles.Delete(stored[TokenFiles.Prefix.Length..]);
+            else if (stored.StartsWith(Keychain.Prefix, StringComparison.Ordinal) && OperatingSystem.IsMacOS())
+                Keychain.Delete(stored[Keychain.Prefix.Length..]);
+        }
+        catch (Exception ex) { Log.Write($"Couldn't delete a stored token: {ex.Message}"); }
     }
+}
+
+/// <summary>
+/// Tokens as files in a folder only the user can open (0700, files 0600), like the GitHub CLI keeps them where
+/// there's no keyring: Linux desktops and headless servers. settings.json only holds "file:&lt;name&gt;".
+/// </summary>
+static class TokenFiles
+{
+    public const string Prefix = "file:";
+
+    public static string Dir => Path.Combine(AppInfo.DataDir, "tokens");
+
+    public static string Add(string plain)
+    {
+        if (!Directory.Exists(Dir))
+        {
+            if (OperatingSystem.IsWindows()) Directory.CreateDirectory(Dir);
+            else Directory.CreateDirectory(Dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+        var name = Guid.NewGuid().ToString("N");
+        var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write };
+        if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        using (var file = new StreamWriter(Path.Combine(Dir, name), new UTF8Encoding(false), options)) file.Write(plain);
+        return Prefix + name;
+    }
+
+    public static string? Find(string name)
+    {
+        try { return File.ReadAllText(PathOf(name)).Trim(); }
+        catch { return null; }
+    }
+
+    public static void Delete(string name) => File.Delete(PathOf(name));
+
+    /// <summary>The token file, refusing names that would reach outside the folder.</summary>
+    static string PathOf(string name) =>
+        name.Length > 0 && name.All(char.IsAsciiLetterOrDigit) ? Path.Combine(Dir, name) : throw new ArgumentException("Bad token reference.");
 }
 
 /// <summary>Windows DPAPI (CurrentUser scope) without an extra NuGet dependency.</summary>

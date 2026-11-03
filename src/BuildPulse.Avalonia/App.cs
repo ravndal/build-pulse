@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.Themes.Fluent;
@@ -13,6 +14,9 @@ sealed class App : Application
 {
     public static bool Demo { get; set; }
     public static bool OpenSettings { get; set; }
+
+    /// <summary>Ctrl+, (⌘, on macOS), the usual shortcut for an app's settings.</summary>
+    public static readonly KeyGesture SettingsGesture = new(Key.OemComma, OperatingSystem.IsMacOS() ? KeyModifiers.Meta : KeyModifiers.Control);
     public static bool Updated { get; set; }
 
     readonly Dictionary<string, ApprovalWindow> _approvalWindows = [];
@@ -67,6 +71,7 @@ sealed class App : Application
             TransparencyLevelHint = [WindowTransparencyLevel.Transparent],
             Content = _dashboard,
         };
+        OpensSettings(_flyout);
         // The measured size can be off before the first layout, and the content grows as runs arrive: keep it anchored.
         _flyout.SizeChanged += (_, e) => { if (_flyout.IsVisible) PlaceFlyout(e.NewSize); };
         // On macOS the window can lose focus right as it opens (the tray menu is still closing), so ignore that.
@@ -94,7 +99,9 @@ sealed class App : Application
         var menu = new NativeMenu();
         menu.Add(Item("Open dashboard", ToggleFlyout));
         menu.Add(Item("Refresh now", () => _ = _watcher.PollAsync()));
-        menu.Add(Item("Settings…", ShowSettings));
+        var settingsItem = Item("Settings…", ShowSettings);
+        settingsItem.Gesture = SettingsGesture;
+        menu.Add(settingsItem);
         menu.Add(new NativeMenuItemSeparator());
         menu.Add(_muteItem);
         menu.Add(startup);
@@ -108,7 +115,7 @@ sealed class App : Application
         TrayIcon.SetIcons(this, [_tray]);
 
         _watcher.Changed += Refresh;
-        _watcher.Notified += (accent, title, body, url) => Toast(accent, title, body, url);
+        _watcher.Notified += (tone, title, body, url) => Toast(Palette.Of(tone), title, body, url);
         Ticker.Subscribe(() => { if (_watcher.State is TrayState.Running or TrayState.Approval) { _frame++; RenderIcon(); } });
         desktop.Exit += (_, _) => { _updateTimer.Stop(); _watcher.Dispose(); };
 
@@ -117,6 +124,13 @@ sealed class App : Application
         if (OpenSettings || !_watcher.Settings.IsConfigured) ShowSettings();
         if (Updated) Toast(Palette.Green, $"Updated to v{Updater.CurrentVersion.ToString(3)}", $"{AppInfo.Name} is up to date.", null);
     }
+
+    void OpensSettings(Window window) => window.KeyDown += (_, e) =>
+    {
+        if (!SettingsGesture.Matches(e)) return;
+        e.Handled = true;
+        ShowSettings();
+    };
 
     static NativeMenuItem Item(string header, Action onClick)
     {
@@ -182,6 +196,7 @@ sealed class App : Application
     void OpenApproval(ApprovalInfo approval)
     {
         var window = new ApprovalWindow(approval) { Decide = _watcher!.DecideAsync };
+        OpensSettings(window);
         window.Snoozed += a => _snoozedUntil[a.Key] = DateTime.Now.AddMinutes(15);
         window.Closed += (_, _) =>
         {

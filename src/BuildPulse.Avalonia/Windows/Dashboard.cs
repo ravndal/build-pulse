@@ -11,22 +11,6 @@ using Avalonia.Styling;
 
 namespace BuildPulse;
 
-public sealed record DashboardModel(
-    IReadOnlyList<ServerConfig> Servers,
-    IReadOnlyList<BuildInfo> Builds,
-    IReadOnlyList<ApprovalInfo> Approvals,
-    IReadOnlyDictionary<string, string> Stages,
-    IReadOnlyDictionary<string, IReadOnlyList<StageStatus>> StageStatuses,
-    DateTime? LastPoll,
-    string? Error,
-    TrayState State,
-    UpdateStatus Update,
-    IReadOnlyCollection<string> CollapsedPanels)
-{
-    public static readonly DashboardModel Empty = new([], [], [], new Dictionary<string, string>(),
-        new Dictionary<string, IReadOnlyList<StageStatus>>(), null, null, TrayState.Unconfigured, new UpdateStatus(UpdateStage.Unsupported), []);
-}
-
 /// <summary>
 /// The flyout, as Avalonia controls rather than owner-drawn: header, Overview (approvals, then one collapsible panel
 /// per repo/project with the latest run of each tracked pipeline) or History (all runs, paged), and a footer.
@@ -196,6 +180,7 @@ sealed class DashboardView : UserControl
         Grid.SetColumn(refresh, 2);
         grid.Children.Add(refresh);
         var settings = Link("Settings", () => SettingsRequested?.Invoke());
+        ToolTip.SetTip(settings, OperatingSystem.IsMacOS() ? "Settings (⌘,)" : "Settings (Ctrl+,)");
         Grid.SetColumn(settings, 3);
         grid.Children.Add(settings);
         return new Border { Background = Palette.Surface, BorderBrush = Palette.Border, BorderThickness = new Thickness(0, 1, 0, 0), Child = grid };
@@ -335,7 +320,7 @@ sealed class DashboardView : UserControl
         if (awaitingApproval) return $"#{b.Number} · waiting for approval";
         if (b.IsActive)
             return _model.Stages.TryGetValue(b.Key, out var stage) ? $"#{b.Number} · {stage}" : $"#{b.Number} · {(b.StartTime != null ? "running" : "queued")}";
-        return $"#{b.Number} · {Palette.ResultText(b.Result)} · {Fmt.Ago(b.FinishTime ?? b.QueueTime)}";
+        return $"#{b.Number} · {Status.ResultText(b.Result)} · {Fmt.Ago(b.FinishTime ?? b.QueueTime)}";
     }
 
     Control History(DashboardModel m)
@@ -442,7 +427,7 @@ sealed class DashboardView : UserControl
         else
         {
             topRight = Fmt.Ago(b.FinishTime ?? b.QueueTime);
-            bottomRight = b.StartTime is { } s && b.FinishTime is { } f ? Fmt.Duration(f - s) : Palette.ResultText(b.Result);
+            bottomRight = b.StartTime is { } s && b.FinishTime is { } f ? Fmt.Duration(f - s) : Status.ResultText(b.Result);
         }
         var activeColor = new SolidColorBrush(awaitingApproval ? Palette.Orange : Palette.Blue);
         var tr = Label(topRight, 12.5, b.IsActive ? activeColor : Palette.Muted);

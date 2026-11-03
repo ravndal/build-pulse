@@ -30,52 +30,21 @@ static class Palette
 
     static IBrush Brush(byte r, byte g, byte b) => new SolidColorBrush(Color.FromRgb(r, g, b));
 
-    public static (Color Color, Glyph Glyph) ForState(TrayState state) => state switch
+    public static Color Of(Tone tone) => tone switch
     {
-        TrayState.Approval => (Orange, Glyph.Bang),
-        TrayState.Running => (Blue, Glyph.Spinner),
-        TrayState.Idle => (Green, Glyph.Check),
-        TrayState.Error => (Red, Glyph.Cross),
-        _ => (Gray, Glyph.Dots),
+        Tone.Green => Green,
+        Tone.Blue => Blue,
+        Tone.Orange => Orange,
+        Tone.Red => Red,
+        Tone.Amber => Amber,
+        _ => Gray,
     };
 
-    public static (Color Color, Glyph Glyph) ForBuild(BuildInfo b, bool awaitingApproval)
-    {
-        if (awaitingApproval) return (Orange, Glyph.Bang);
-        if (b.Status == "inProgress") return (Blue, Glyph.Spinner);
-        if (b.IsActive) return (Blue, Glyph.Ring);
-        return ForResult(b.Result);
-    }
+    public static (Color Color, Glyph Glyph) ForState(TrayState state) => Of(Status.ForState(state));
+    public static (Color Color, Glyph Glyph) ForBuild(BuildInfo b, bool awaitingApproval) => Of(Status.ForBuild(b, awaitingApproval));
+    public static (Color Color, Glyph Glyph) ForStage(StageStatus s) => Of(Status.ForStage(s));
 
-    public static (Color Color, Glyph Glyph) ForResult(string? result) => result switch
-    {
-        "succeeded" => (Green, Glyph.Check),
-        "failed" => (Red, Glyph.Cross),
-        "partiallySucceeded" => (Amber, Glyph.Bang),
-        _ => (Gray, Glyph.Dash),
-    };
-
-    public static (Color Color, Glyph Glyph) ForStage(StageStatus s) => s.State switch
-    {
-        "inProgress" => s.Waiting ? (Orange, Glyph.Bang) : (Blue, Glyph.Spinner),
-        "completed" => s.Result switch
-        {
-            "succeeded" => (Green, Glyph.Check),
-            "succeededWithIssues" => (Amber, Glyph.Bang),
-            "failed" or "abandoned" => (Red, Glyph.Cross),
-            _ => (Gray, Glyph.Dash),   // skipped, canceled
-        },
-        _ => (Gray, Glyph.Ring),       // pending
-    };
-
-    public static string ResultText(string? result) => result switch
-    {
-        "succeeded" => "Succeeded",
-        "failed" => "Failed",
-        "partiallySucceeded" => "Partially succeeded",
-        "canceled" => "Canceled",
-        _ => "Finished",
-    };
+    static (Color, Glyph) Of((Tone Tone, Glyph Glyph) status) => (Of(status.Tone), status.Glyph);
 }
 
 /// <summary>Shared animation clock for spinners and the approval flash; ticks only while something listens.</summary>

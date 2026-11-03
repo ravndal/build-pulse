@@ -24,7 +24,7 @@ A small tray app that watches selected Azure DevOps pipelines and GitHub Actions
 | Red ✕ | Can't reach the server |
 | Small red dot | The latest finished run of a tracked pipeline failed |
 
-- **Approvals** pop up in the bottom-right corner and stay until you **Approve**, **Reject** (asks you to confirm), **Open** it in the browser, or **Later** (snoozes it for 15 minutes; the icon keeps flashing).
+- **Approvals** pop up in the bottom-right corner and stay until you **Approve**, **Reject** (asks you to confirm), **Open** it in the browser, or **Later** (snoozes it for 5, 15 or 30 minutes, an hour, until 08:00 tomorrow, or for good until you reopen it from the tray; the icon keeps flashing).
 - **Other status changes** (started, stage changed, succeeded, failed, ...) show as toasts that fade after about 6 seconds. You can mute them from the tray menu.
 - **Left-click** the icon to open the dashboard: pending approvals plus the last 8 builds. Click a row to open it in the browser. Click a panel's header to collapse it to one status icon per pipeline (hover an icon for details, click it to open the run); collapsed panels stay collapsed across restarts.
 - **Right-click** the icon for Refresh, Settings, Mute, Start with Windows (Open at login on macOS), and Exit. **Ctrl+,** (**⌘,** on macOS) opens Settings from the dashboard or a popup.

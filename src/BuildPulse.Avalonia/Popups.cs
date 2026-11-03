@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -139,8 +140,20 @@ sealed class ToastWindow : PopupWindow
 sealed class ApprovalWindow : PopupWindow
 {
     public Func<ApprovalInfo, bool, string, Task>? Decide { get; set; }
-    public event Action<ApprovalInfo>? Snoozed;
+    /// <summary>Raised with the time the popup may come back; <see cref="DateTime.MaxValue"/> means never.</summary>
+    public event Action<ApprovalInfo, DateTime>? Snoozed;
     public ApprovalInfo Approval { get; private set; }
+
+    /// <summary>Choices under Later. "Tomorrow" is 08:00 the next day.</summary>
+    static readonly (string Label, Func<DateTime> Until)[] SnoozeOptions =
+    [
+        ("5 minutes", () => DateTime.Now.AddMinutes(5)),
+        ("15 minutes", () => DateTime.Now.AddMinutes(15)),
+        ("30 minutes", () => DateTime.Now.AddMinutes(30)),
+        ("1 hour", () => DateTime.Now.AddHours(1)),
+        ("Tomorrow", () => DateTime.Today.AddDays(1).AddHours(8)),
+        ("Never", () => DateTime.MaxValue),
+    ];
 
     readonly TextBlock _meta, _status;
     readonly TextBox _comment = new() { PlaceholderText = "Comment (optional)", Margin = new Thickness(0, 12, 0, 0) };
@@ -200,7 +213,14 @@ sealed class ApprovalWindow : PopupWindow
             _ = DecideAsync(approve: false);
         };
         _open.Click += (_, _) => Shell.Open(Approval.WebUrl);
-        _later.Click += (_, _) => { Snoozed?.Invoke(Approval); Close(); };
+        var snoozeMenu = new MenuFlyout { Placement = PlacementMode.TopEdgeAlignedRight };
+        foreach (var (label, until) in SnoozeOptions)
+        {
+            var item = new MenuItem { Header = label };
+            item.Click += (_, _) => { Snoozed?.Invoke(Approval, until()); Close(); };
+            snoozeMenu.Items.Add(item);
+        }
+        _later.Flyout = snoozeMenu;
 
         _pulse.Tick += (_, _) =>
         {

@@ -11,7 +11,7 @@ static class Program
     {
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Write($"Fatal: {e.ExceptionObject}");
         // One self-contained executable per runtime in the GitHub release, e.g. BuildPulse-osx-arm64; Windows keeps
-        // the default BuildPulse.exe. Releases also carry DevOpsWatcher* copies, the names older installs update from.
+        // the default BuildPulse.exe.
         if (!OperatingSystem.IsWindows()) Updater.AssetName = $"{AppInfo.Id}-{RuntimeInformation.RuntimeIdentifier}";
 
         int shots = Array.FindIndex(args, a => a.Equals("--screenshots", StringComparison.OrdinalIgnoreCase));

@@ -43,11 +43,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          Copy-Item publish/BuildPulse.exe publish/DevOpsWatcher.exe
-          gh release create '${{ github.ref_name }}' publish/BuildPulse.msi publish/BuildPulse.exe publish/DevOpsWatcher.exe publish/buildpulse-tui.exe --title '${{ github.ref_name }}' --generate-notes
+          gh release create '${{ github.ref_name }}' publish/BuildPulse.msi publish/BuildPulse.exe publish/buildpulse-tui.exe --title '${{ github.ref_name }}' --generate-notes
 
   # macOS and Linux, one single-file executable per runtime (named as Updater.AssetName expects).
-  # Every asset also ships as DevOpsWatcher*, the name that pre-rename installs update from.
   # macOS builds run on a Mac so the SDK can ad-hoc sign the executable, which Apple silicon requires.
   cross-platform:
     needs: release
@@ -71,11 +69,10 @@ jobs:
           dotnet publish src/BuildPulse.Avalonia -c Release -r ${{ matrix.rid }} --self-contained \
             -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:Version=$version -o publish
           mv publish/BuildPulse "publish/BuildPulse-${{ matrix.rid }}"
-          cp "publish/BuildPulse-${{ matrix.rid }}" "publish/DevOpsWatcher-${{ matrix.rid }}"
           dotnet publish src/BuildPulse.Tui -c Release -r ${{ matrix.rid }} --self-contained             -p:PublishSingleFile=true -p:Version=$version -o publish-tui
           mv publish-tui/buildpulse-tui "publish/buildpulse-tui-${{ matrix.rid }}"
 
       - name: Upload to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" "publish/BuildPulse-${{ matrix.rid }}" "publish/DevOpsWatcher-${{ matrix.rid }}" "publish/buildpulse-tui-${{ matrix.rid }}"
+        run: gh release upload "$GITHUB_REF_NAME" "publish/BuildPulse-${{ matrix.rid }}" "publish/buildpulse-tui-${{ matrix.rid }}"

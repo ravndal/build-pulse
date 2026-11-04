@@ -79,7 +79,7 @@ It shares `settings.json` and tokens with the tray app, and each picks up change
 
 The app never updates itself on its own. The dashboard footer (and the tray menu) has a **Check for updates** button; the app also looks quietly 30 seconds after start and then every 6 hours. When a newer release is found the button changes to **Update to vX.Y.Z**, and only clicking it downloads the new executable, checks its SHA-256 against the release, and restarts into it. This works the same for MSI installs.
 
-Build Pulse used to be called DevOps Watcher. Updating an old install keeps its `DevOpsWatcher.exe` file name, and the first start moves its settings, log and start-at-login entry to the new names. Releases still ship `DevOpsWatcher*` copies of each executable so older versions can find the update.
+Build Pulse used to be called DevOps Watcher. Updating an old install keeps its `DevOpsWatcher.exe` file name, and the first start moves its settings, log and start-at-login entry to the new names. Releases no longer ship `DevOpsWatcher*` copies, so installs from before the rename can't update from them and need a fresh install of the current release.
 
 ### Connect your servers
 

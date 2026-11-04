@@ -39,14 +39,23 @@ static partial class Updater
     /// <summary>The release asset this build updates from: BuildPulse.exe on Windows, one executable per runtime elsewhere.</summary>
     public static string AssetName { get; set; } = AppInfo.Id + ".exe";
 
-    static readonly string DownloadDir = Path.Combine(
+    /// <summary>
+    /// Names the downloads and their folder, so the tray and terminal apps, which can run side by side, never clean up
+    /// each other's: the tray app downloads into update/, the terminal app into update/buildpulse-tui/.
+    /// </summary>
+    public static string DownloadName { get; set; } = AppInfo.Id;
+
+    static readonly string UpdateRoot = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), AppInfo.Id, "update");
+
+    static string DownloadDir => DownloadName == AppInfo.Id ? UpdateRoot : Path.Combine(UpdateRoot, DownloadName);
 
     public static Version CurrentVersion { get; } = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0);
 
     /// <summary>Only the single-file release exe can replace itself; a dotnet build output can't.</summary>
     public static bool IsSupported =>
-        Environment.ProcessPath != null && !File.Exists(Path.Combine(AppContext.BaseDirectory, AppInfo.Id + ".dll"));
+        Environment.ProcessPath != null
+        && !File.Exists(Path.Combine(AppContext.BaseDirectory, (Assembly.GetEntryAssembly()?.GetName().Name ?? AppInfo.Id) + ".dll"));
 
     sealed class Release
     {
@@ -97,7 +106,7 @@ static partial class Updater
         var expected = ExpectedHash(update);
         using var http = CreateHttp();
         Directory.CreateDirectory(DownloadDir);
-        var target = Path.Combine(DownloadDir, $"{AppInfo.Id}-{update.Version}.download");
+        var target = Path.Combine(DownloadDir, $"{DownloadName}-{update.Version}.download");
         if (!File.Exists(target) || !HashMatches(target, expected))
         {
             var partial = target + ".part";
@@ -118,8 +127,11 @@ static partial class Updater
         return target;
     }
 
-    /// <summary>Puts the downloaded exe in place of the running one and starts it. The caller exits afterwards.</summary>
-    public static void Install(UpdateInfo update, string downloadedExe)
+    /// <summary>
+    /// Puts the downloaded exe in place of the running one and, unless <paramref name="relaunch"/> is off, starts it.
+    /// The caller exits afterwards.
+    /// </summary>
+    public static void Install(UpdateInfo update, string downloadedExe, bool relaunch = true)
     {
         // Verify the exact bytes that get written, so the file can't be swapped between the check and the copy.
         var bytes = File.ReadAllBytes(downloadedExe);
@@ -141,7 +153,7 @@ static partial class Updater
             File.Move(backup, exe);
             throw;
         }
-        Process.Start(new ProcessStartInfo(exe, UpdatedArg) { UseShellExecute = false });
+        if (relaunch) Process.Start(new ProcessStartInfo(exe, UpdatedArg) { UseShellExecute = false });
     }
 
     /// <summary>Removes what an earlier update left behind.</summary>
@@ -150,7 +162,7 @@ static partial class Updater
         if (Environment.ProcessPath is { } exe) TryDelete(exe + ".old");
         if (Directory.Exists(DownloadDir))
             foreach (var file in Directory.EnumerateFiles(DownloadDir))
-                if (!Version.TryParse(Path.GetFileNameWithoutExtension(file).Replace(AppInfo.Id + "-", ""), out var v)
+                if (!Version.TryParse(Path.GetFileNameWithoutExtension(file).Replace(DownloadName + "-", ""), out var v)
                     || Normalize(v) <= Normalize(CurrentVersion))
                     TryDelete(file);
     }

@@ -2,7 +2,7 @@ namespace BuildPulse;
 
 /// <summary>
 /// The terminal dashboard: a status header, pending approvals, then the tracked pipelines grouped by repo/project
-/// (or every run, in History), and a footer for key hints, prompts and toasts. Built to stay readable down to
+/// (or every run, in History, or the settings tab), and a footer for key hints, prompts and toasts. Built to stay readable down to
 /// about 40×8, so it fits a tmux split; columns drop out as the pane gets narrower.
 /// </summary>
 sealed class Dashboard
@@ -10,7 +10,8 @@ sealed class Dashboard
     static readonly string[] Spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     static readonly TimeSpan ToastTime = TimeSpan.FromSeconds(6);
 
-    enum View { Pipelines, History }
+    /// <summary>The tabs along the header; Settings is shown by <see cref="_settings"/> rather than <see cref="_view"/>.</summary>
+    enum View { Pipelines, History, Settings }
     enum Kind { Section, Group, Approval, Build, NoRuns, Note }
 
     /// <summary>One entry in the list; everything but sections and notes can be selected.</summary>
@@ -231,6 +232,13 @@ sealed class Dashboard
             Draw();
             return;
         }
+        if (_settings is { AtTop: true } && TabKey(key) is { } target and not View.Settings)
+        {
+            // Settings is the third tab: tab, shift+tab and 1/2 leave it for the other views.
+            ShowView(target);
+            _settings.Leave(); // closing settings redraws
+            return;
+        }
         if (_settings != null)
         {
             _settings.OnKey(key);
@@ -254,12 +262,12 @@ sealed class Dashboard
             case ConsoleKey.Home: Move(int.MinValue / 2); break;
             case ConsoleKey.End: Move(int.MaxValue / 2); break;
             case ConsoleKey.G: Move(key.Modifiers.HasFlag(ConsoleModifiers.Shift) ? int.MaxValue / 2 : int.MinValue / 2); break;
-            case ConsoleKey.Tab or ConsoleKey.H or ConsoleKey.L:
-                _view = _view == View.Pipelines ? View.History : View.Pipelines;
-                _scroll = 0;
+            case ConsoleKey.H or ConsoleKey.L:
+                ShowView(_view == View.Pipelines ? View.History : View.Pipelines);
                 break;
-            case ConsoleKey.D1: _view = View.Pipelines; _scroll = 0; break;
-            case ConsoleKey.D2: _view = View.History; _scroll = 0; break;
+            case ConsoleKey.Tab or ConsoleKey.D1 or ConsoleKey.D2 or ConsoleKey.D3:
+                if (TabKey(key) is { } tab) { if (tab == View.Settings) OpenSettings(); else ShowView(tab); }
+                break;
             case ConsoleKey.Enter or ConsoleKey.O or ConsoleKey.Spacebar or ConsoleKey.LeftArrow or ConsoleKey.RightArrow:
                 if (selected?.Group is { } g)
                 {
@@ -283,7 +291,7 @@ sealed class Dashboard
                 _muted = !_muted;
                 Toast(_muted ? "Status toasts muted" : "Status toasts on", Tone.Gray);
                 break;
-            case ConsoleKey.S or ConsoleKey.OemComma: OpenSettings(); break; // also ctrl+, where the terminal passes it on
+            case ConsoleKey.S or ConsoleKey.OemComma: OpenSettings(); break; // ctrl+, too, where the terminal passes it on
             case ConsoleKey.Oem2 or ConsoleKey.F1: _help = true; break; // '?' and '/'
             case ConsoleKey.Q or ConsoleKey.Escape: Quit(); return;
             default:
@@ -291,6 +299,24 @@ sealed class Dashboard
                 break;
         }
         Draw();
+    }
+
+    View CurrentTab => _settings != null ? View.Settings : _view;
+
+    /// <summary>The tab a tab, shift+tab or 1–3 press goes to, or null for any other key.</summary>
+    View? TabKey(ConsoleKeyInfo key) => key.Key switch
+    {
+        ConsoleKey.D1 => View.Pipelines,
+        ConsoleKey.D2 => View.History,
+        ConsoleKey.D3 => View.Settings,
+        ConsoleKey.Tab => (View)(((int)CurrentTab + (key.Modifiers.HasFlag(ConsoleModifiers.Shift) ? 2 : 1)) % 3),
+        _ => null,
+    };
+
+    void ShowView(View view)
+    {
+        _view = view;
+        _scroll = 0;
     }
 
     static string? Link(Item? item) => item?.Approval?.WebUrl ?? item?.Build?.WebUrl;
@@ -410,13 +436,20 @@ sealed class Dashboard
         var right = new Line();
         if (_width >= 30)
         {
-            right.Add(_settings?.Heading ?? (_view == View.Pipelines ? "pipelines" : "history"), Colors.Blue);
+            // Wide enough: every tab, the current one lit. Inside a server editor, its page instead.
+            if (_settings is { AtTop: false }) right.Add(_settings.Heading, Colors.Blue);
+            else if (_width >= 72)
+                foreach (var (tab, i) in Enum.GetValues<View>().Select((t, i) => (t, i)))
+                    right.Add(i > 0 ? " " : "").Add(Tab(tab), tab == CurrentTab ? Colors.Blue : Colors.Faint, bold: tab == CurrentTab);
+            else right.Add(Tab(CurrentTab), Colors.Blue);
             right.Add(" · ", Colors.Faint);
         }
         right.Add(_busy ?? (_model.LastPoll is { } t ? Since(t) : "…"), _busy != null ? Colors.Amber : Colors.Muted);
         right.Add(" ");
         return Line.Spread(left, right, _width);
     }
+
+    static string Tab(View view) => view.ToString().ToLowerInvariant();
 
     static string Since(DateTime t)
     {
@@ -624,12 +657,12 @@ sealed class Dashboard
         (string Key, string What)[] keys =
         [
             ("↑↓ j k", "move"), ("⏎ o", "open in browser / fold"), ("← →", "fold / unfold repo"),
-            ("a", "approve or resume"), ("x d", "reject"), ("tab 1 2", "pipelines / history"),
+            ("a", "approve or resume"), ("x d", "reject"), ("tab 1-3", "pipelines / history / settings (shift+tab back)"),
             ("r", "refresh now"), ("m", "mute status toasts"), ("s ctrl+,", "settings: servers, pipelines"), ("q esc", "quit"),
         ];
         yield return new Line().Add(" KEYS", Colors.Blue, bold: true);
         foreach (var (key, what) in keys.Take(Math.Max(0, BodyHeight - 1)))
-            yield return new Line().Add("  " + key.PadRight(9), Colors.Text, bold: true).Add(what, Colors.Muted);
+            yield return new Line().Add("  " + key.PadRight(10), Colors.Text, bold: true).Add(what, Colors.Muted);
     }
 
     Line Footer()

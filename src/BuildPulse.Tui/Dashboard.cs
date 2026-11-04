@@ -263,7 +263,10 @@ sealed class Dashboard
             case UpdateStage.Unsupported:
                 Toast(_demo ? "No updates in demo mode" : $"v{Updater.CurrentVersion.ToString(3)} · only release builds update themselves", Tone.Gray);
                 break;
-            case UpdateStage.Checking or UpdateStage.Installing:
+            case UpdateStage.Checking:
+                Toast("Checking for updates…", Tone.Blue);
+                break;
+            case UpdateStage.Installing:
                 break;
             case UpdateStage.Available when _pendingUpdate is { } update:
                 _prompt = new Prompt($"Update to v{update.Version.ToString(3)} and restart?", Tone.Green, () => InstallUpdateAsync(update));
@@ -279,9 +282,10 @@ sealed class Dashboard
         if (_update.Stage is UpdateStage.Unsupported or UpdateStage.Checking or UpdateStage.Installing) return;
         if (!manual && _pendingUpdate != null) return;
         var before = _update;
+        // Checking even when quiet, so u can't start a second check that races this one.
+        _update = new UpdateStatus(UpdateStage.Checking);
         if (manual)
         {
-            _update = new UpdateStatus(UpdateStage.Checking);
             Toast("Checking for updates…", Tone.Blue);
             Draw();
         }
@@ -785,7 +789,7 @@ sealed class Dashboard
     string UpdateHelp => _update.Stage switch
     {
         UpdateStage.Available => $"install v{_update.Available!.ToString(3)} and restart",
-        UpdateStage.Unsupported => "update (release builds only)",
+        UpdateStage.Unsupported => _demo ? "update (off in demo mode)" : "update (release builds only)",
         _ => "check for updates",
     };
 

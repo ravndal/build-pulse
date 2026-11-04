@@ -235,9 +235,8 @@ sealed class Dashboard
         if (_settings is { AtTop: true } && TabKey(key) is { } target and not View.Settings)
         {
             // Settings is the third tab: tab, shift+tab and 1/2 leave it for the other views.
-            _settings.Leave();
             ShowView(target);
-            Draw();
+            _settings.Leave(); // closing settings redraws
             return;
         }
         if (_settings != null)
@@ -658,7 +657,7 @@ sealed class Dashboard
         (string Key, string What)[] keys =
         [
             ("↑↓ j k", "move"), ("⏎ o", "open in browser / fold"), ("← →", "fold / unfold repo"),
-            ("a", "approve or resume"), ("x d", "reject"), ("tab 1 2 3", "pipelines / history / settings"),
+            ("a", "approve or resume"), ("x d", "reject"), ("tab 1-3", "pipelines / history / settings (shift+tab back)"),
             ("r", "refresh now"), ("m", "mute status toasts"), ("s ctrl+,", "settings: servers, pipelines"), ("q esc", "quit"),
         ];
         yield return new Line().Add(" KEYS", Colors.Blue, bold: true);

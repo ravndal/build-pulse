@@ -35,6 +35,7 @@ sealed class Dashboard
     readonly Terminal _term;
     readonly Watcher _watcher;
     readonly bool _demo;
+    readonly bool _updated;
     readonly HashSet<string> _collapsed;
     readonly HashSet<string> _knownApprovals = [];
     readonly Dictionary<string, ApprovalInfo> _lastApprovals = [];
@@ -54,11 +55,17 @@ sealed class Dashboard
     bool _help, _muted;
     DateTime _settingsStamp;
     SettingsScreen? _settings;
+    UpdateStatus _update = new(UpdateStage.Unsupported);
+    UpdateInfo? _pendingUpdate;
+    Timer? _updateTimer;
+    Thread? _input;
+    volatile bool _closed;
 
-    public Dashboard(MainLoop loop, bool demo, Terminal term)
+    public Dashboard(MainLoop loop, bool demo, Terminal term, bool updated = false)
     {
         _loop = loop;
         _demo = demo;
+        _updated = updated;
         _term = term;
         _watcher = new Watcher(demo);
         _collapsed = [.. _watcher.Settings.CollapsedPanels];
@@ -74,18 +81,37 @@ sealed class Dashboard
         _watcher.Apply(_watcher.Settings);
 
         var ticker = new Timer(_ => _loop.Post(Tick), null, 0, 100);
-        var input = new Thread(() =>
+        // Polls rather than blocking in ReadKey, so the thread can stop: after an update the new version takes over
+        // this terminal, and a ReadKey left waiting here would steal its keys.
+        _input = new Thread(() =>
         {
-            while (true)
+            while (!_closed)
             {
+                if (!Console.KeyAvailable) { Thread.Sleep(15); continue; }
                 var key = Console.ReadKey(intercept: true);
                 _loop.Post(() => OnKey(key));
             }
         }) { IsBackground = true, Name = "Keys" };
-        if (readKeys) input.Start();
-        Quit = () => { ticker.Dispose(); _watcher.Dispose(); _term.Leave(); _loop.Stop(); };
+        if (readKeys) _input.Start();
+        Quit = () =>
+        {
+            _closed = true;
+            ticker.Dispose();
+            _updateTimer?.Dispose();
+            _watcher.Dispose();
+            _term.Leave();
+            _loop.Stop();
+        };
+        StartUpdater();
+        if (_updated) Toast($"Updated to v{Updater.CurrentVersion.ToString(3)}", Tone.Green);
         if (!_demo && _watcher.Settings.Servers.Count == 0) OpenSettings();
     }
+
+    /// <summary>Set when the app quit to restart into an update it just installed.</summary>
+    public bool Relaunch { get; private set; }
+
+    /// <summary>Waits for the key thread to notice the quit, so it can't read keys meant for the next process.</summary>
+    public void StopReadingKeys() => _input?.Join(TimeSpan.FromSeconds(1));
 
     void OpenSettings()
     {
@@ -114,7 +140,7 @@ sealed class Dashboard
 
     void OnChanged()
     {
-        _model = _watcher.Model(new UpdateStatus(UpdateStage.Unsupported));
+        _model = _watcher.Model(_update);
         var pending = _model.Approvals.ToDictionary(a => a.Key);
 
         var fresh = pending.Values.Where(a => !_knownApprovals.Contains(a.Key)).ToList();
@@ -218,6 +244,98 @@ sealed class Dashboard
 
     Item? Selected => _items.FirstOrDefault(i => i.Key == _selected);
 
+    // ---- Self-update ----
+
+    /// <summary>Like the tray app: a quiet check 30 seconds after start and every 6 hours; installing waits for u.</summary>
+    void StartUpdater()
+    {
+        if (_demo || !Updater.IsSupported) return;
+        Updater.CleanUp();
+        _update = new UpdateStatus(UpdateStage.Idle);
+        _updateTimer = new Timer(_ => _loop.Post(() => _ = CheckForUpdateAsync(manual: false)), null,
+            TimeSpan.FromSeconds(30), TimeSpan.FromHours(6));
+    }
+
+    void OnUpdateKey()
+    {
+        switch (_update.Stage)
+        {
+            case UpdateStage.Unsupported:
+                Toast(_demo ? "No updates in demo mode" : $"v{Updater.CurrentVersion.ToString(3)} · only release builds update themselves", Tone.Gray);
+                break;
+            case UpdateStage.Checking:
+                Toast("Checking for updates…", Tone.Blue);
+                break;
+            case UpdateStage.Installing:
+                break;
+            case UpdateStage.Available when _pendingUpdate is { } update:
+                _prompt = new Prompt($"Update to v{update.Version.ToString(3)} and restart?", Tone.Green, () => InstallUpdateAsync(update));
+                break;
+            default:
+                _ = CheckForUpdateAsync(manual: true);
+                break;
+        }
+    }
+
+    async Task CheckForUpdateAsync(bool manual)
+    {
+        if (_update.Stage is UpdateStage.Unsupported or UpdateStage.Checking or UpdateStage.Installing) return;
+        if (!manual && _pendingUpdate != null) return;
+        var before = _update;
+        // Checking even when quiet, so u can't start a second check that races this one.
+        _update = new UpdateStatus(UpdateStage.Checking);
+        if (manual)
+        {
+            Toast("Checking for updates…", Tone.Blue);
+            Draw();
+        }
+        try
+        {
+            var update = await Updater.CheckAsync();
+            _pendingUpdate = update;
+            if (update != null)
+            {
+                Log.Write($"Update v{update.Version} available");
+                _update = new UpdateStatus(UpdateStage.Available, update.Version);
+                Toast($"Update v{update.Version.ToString(3)} available · press u to install", Tone.Green);
+            }
+            else
+            {
+                _update = manual ? new UpdateStatus(UpdateStage.UpToDate) : before;
+                if (manual) Toast($"Up to date (v{Updater.CurrentVersion.ToString(3)})", Tone.Green);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"Update check failed: {ex.GetType().Name}: {ex.Message}");
+            _update = manual ? new UpdateStatus(UpdateStage.Failed) : before;
+            if (manual) Toast($"Update check failed: {ex.Message}", Tone.Red);
+        }
+        Draw();
+    }
+
+    /// <summary>Downloads and swaps in the update, then quits; Program starts the new version in this terminal.</summary>
+    async Task InstallUpdateAsync(UpdateInfo update)
+    {
+        _update = new UpdateStatus(UpdateStage.Installing, update.Version);
+        _busy = $"updating to v{update.Version.ToString(3)}…";
+        try
+        {
+            Log.Write($"Installing update v{update.Version}");
+            var exe = await Updater.DownloadAsync(update);
+            Updater.Install(update, exe, relaunch: false);
+            Relaunch = true;
+            Quit();
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"Update install failed: {ex.GetType().Name}: {ex.Message}");
+            _update = new UpdateStatus(UpdateStage.Available, update.Version);
+            Toast($"Update failed: {ex.Message} · get it from {update.ReleaseUrl}", Tone.Red);
+        }
+        finally { _busy = null; }
+    }
+
     // ---- Keys ----
 
     public void OnKey(ConsoleKeyInfo key)
@@ -291,6 +409,7 @@ sealed class Dashboard
                 _muted = !_muted;
                 Toast(_muted ? "Status toasts muted" : "Status toasts on", Tone.Gray);
                 break;
+            case ConsoleKey.U: OnUpdateKey(); break;
             case ConsoleKey.S or ConsoleKey.OemComma: OpenSettings(); break; // ctrl+, too, where the terminal passes it on
             case ConsoleKey.Oem2 or ConsoleKey.F1: _help = true; break; // '?' and '/'
             case ConsoleKey.Q or ConsoleKey.Escape: Quit(); return;
@@ -367,6 +486,7 @@ sealed class Dashboard
 
     void Draw()
     {
+        if (_closed) return; // the terminal is handed back; an await finishing late mustn't draw over it
         int width = _term.Width, height = _term.Height;
         if (width != _width || height != _height)
         {
@@ -658,12 +778,20 @@ sealed class Dashboard
         [
             ("↑↓ j k", "move"), ("⏎ o", "open in browser / fold"), ("← →", "fold / unfold repo"),
             ("a", "approve or resume"), ("x d", "reject"), ("tab 1-3", "pipelines / history / settings (shift+tab back)"),
-            ("r", "refresh now"), ("m", "mute status toasts"), ("s ctrl+,", "settings: servers, pipelines"), ("q esc", "quit"),
+            ("r", "refresh now"), ("m", "mute status toasts"), ("s ctrl+,", "settings: servers, pipelines"),
+            ("u", UpdateHelp), ("q esc", "quit"),
         ];
-        yield return new Line().Add(" KEYS", Colors.Blue, bold: true);
+        yield return new Line().Add(" KEYS", Colors.Blue, bold: true).Add($"  v{Updater.CurrentVersion.ToString(3)}", Colors.Faint);
         foreach (var (key, what) in keys.Take(Math.Max(0, BodyHeight - 1)))
             yield return new Line().Add("  " + key.PadRight(10), Colors.Text, bold: true).Add(what, Colors.Muted);
     }
+
+    string UpdateHelp => _update.Stage switch
+    {
+        UpdateStage.Available => $"install v{_update.Available!.ToString(3)} and restart",
+        UpdateStage.Unsupported => _demo ? "update (off in demo mode)" : "update (release builds only)",
+        _ => "check for updates",
+    };
 
     Line Footer()
     {
@@ -692,6 +820,8 @@ sealed class Dashboard
                 if (hints.Length + key.Length + what.Length + 4 <= _width) Hint(key, what);
             return new Line().Add(" ").Add(hints);
         }
+        if (_update.Stage == UpdateStage.Available)
+            hints.Add("u", Colors.Green, bold: true).Add(_width >= 64 ? $" update v{_update.Available!.ToString(3)}" : " update", Colors.Green);
         if (_width >= 64)
         {
             Hint("↑↓", "move"); Hint("⏎", "open");

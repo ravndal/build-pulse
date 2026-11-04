@@ -73,7 +73,7 @@ The tray icon needs a desktop with a system tray (StatusNotifierItem / AppIndica
 - **s** adds, edits and removes servers, picks pipelines from a project tree (**space** ticks, **/** filters, **s** saves) and sets the poll interval, so it can be set up entirely over SSH on a server with no desktop. It opens by itself when no server is set up.
 - The pane title follows the state (`Build Pulse ! 1 waiting`).
 
-It shares `settings.json` and tokens with the tray app, and each picks up changes the other makes while it runs. It can run beside the tray app. Colors are 24-bit where the terminal sets `COLORTERM=truecolor`, 256-color otherwise, and off with `NO_COLOR`. It doesn't update itself; download the new release. `buildpulse-tui --demo` tries it with fake pipelines.
+It shares `settings.json` and tokens with the tray app, and each picks up changes the other makes while it runs. It can run beside the tray app. Colors are 24-bit where the terminal sets `COLORTERM=truecolor`, 256-color otherwise, and off with `NO_COLOR`. It updates itself like the tray app: **u** checks for a new release (it also looks quietly 30 seconds after start and every 6 hours), and when one is found the footer shows **u update vX.Y.Z**; **u** then **y** downloads it, checks its SHA-256 and restarts it in the same pane. `buildpulse-tui --demo` tries it with fake pipelines.
 
 ### Updates
 

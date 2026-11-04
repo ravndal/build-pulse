@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+
 namespace BuildPulse;
 
 static class Program
@@ -5,6 +8,9 @@ static class Program
     static int Main(string[] args)
     {
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log.Write($"TUI fatal: {e.ExceptionObject}");
+        // Release assets: buildpulse-tui.exe on Windows, buildpulse-tui-<runtime> elsewhere.
+        Updater.AssetName = OperatingSystem.IsWindows() ? "buildpulse-tui.exe" : $"buildpulse-tui-{RuntimeInformation.RuntimeIdentifier}";
+        Updater.DownloadName = "buildpulse-tui";
 
         if (Has(args, "--help") || Has(args, "-h"))
         {
@@ -40,12 +46,37 @@ static class Program
         if (!demo) AppInfo.MigrateLegacy();
 
         var loop = new MainLoop();
-        var dashboard = new Dashboard(loop, demo, new Terminal());
+        var dashboard = new Dashboard(loop, demo, new Terminal(), updated: Has(args, Updater.UpdatedArg));
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; loop.Post(dashboard.Quit); };
         AppDomain.CurrentDomain.ProcessExit += (_, _) => Console.Write("\e[0m\e[?7h\e[?25h\e[?1049l");
         loop.Post(() => dashboard.Start());
         loop.Run();
-        return 0;
+        return dashboard.Relaunch ? Relaunch(dashboard, args) : 0;
+    }
+
+    /// <summary>
+    /// Starts the updated executable in this terminal and waits for it. .NET can't exec, and the child of a process
+    /// that already exited would lose the terminal to the shell, so this one stays until the new version quits.
+    /// </summary>
+    static int Relaunch(Dashboard dashboard, string[] args)
+    {
+        dashboard.StopReadingKeys();
+        var start = new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false };
+        foreach (var arg in args.Where(a => !a.Equals(Updater.UpdatedArg, StringComparison.OrdinalIgnoreCase)))
+            start.ArgumentList.Add(arg);
+        start.ArgumentList.Add(Updater.UpdatedArg);
+        try
+        {
+            using var child = Process.Start(start)!;
+            child.WaitForExit();
+            return child.ExitCode;
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"TUI: couldn't start the update: {ex.Message}");
+            Console.Error.WriteLine($"Updated, but couldn't start the new version ({ex.Message}). Run buildpulse-tui again.");
+            return 1;
+        }
     }
 
     /// <summary>

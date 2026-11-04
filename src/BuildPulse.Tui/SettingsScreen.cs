@@ -45,6 +45,9 @@ sealed class SettingsScreen
 
     public string Heading => _editor?.Heading ?? "settings";
 
+    /// <summary>On the servers list rather than inside a server editor, so tab and 1–3 switch views.</summary>
+    public bool AtTop => _editor == null;
+
     List<(Row Row, ServerConfig? Server)> Rows() =>
     [
         .. _settings.Servers.Select(s => (Row.Server, (ServerConfig?)s)),
@@ -125,7 +128,8 @@ sealed class SettingsScreen
         return Task.CompletedTask;
     });
 
-    void Leave()
+    /// <summary>Saves pending option changes and closes settings.</summary>
+    public void Leave()
     {
         if (_optionsChanged) Commit("Settings saved");
         _close();
@@ -168,10 +172,10 @@ sealed class SettingsScreen
         var row = Rows()[Math.Clamp(_row, 0, Rows().Count - 1)].Row;
         return row switch
         {
-            Row.Server => [("⏎", "edit"), ("a", "add"), ("x", "remove"), ("esc", "back")],
-            Row.Add => [("⏎", "add server"), ("esc", "back")],
-            Row.Poll => [("← →", "change"), ("esc", "back")],
-            _ => [("⏎", "toggle"), ("esc", "back")],
+            Row.Server => [("⏎", "edit"), ("a", "add"), ("x", "remove"), ("tab", "view"), ("esc", "back")],
+            Row.Add => [("⏎", "add server"), ("tab", "view"), ("esc", "back")],
+            Row.Poll => [("← →", "change"), ("tab", "view"), ("esc", "back")],
+            _ => [("⏎", "toggle"), ("tab", "view"), ("esc", "back")],
         };
     }
 
